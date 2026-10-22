@@ -14,12 +14,12 @@ export const SESSION_DAYS = 14;
  * デモログイン（パスワードなしで利用者を選んでログイン）
  * - 開発環境: DEMO_LOGIN=true のときだけ
  * - 本番ビルド: 実データの本番では使えない。架空データだけの「デモ環境」として公開する場合に限り、
- *   DEMO_LOGIN=true と DEMO_ENVIRONMENT=true の両方を設定したときだけ有効。
+ *   DEMO_ENVIRONMENT=true を設定したときだけ有効。
  *   その場合もデモ用アカウント（@demo.invalid）以外にはデモログインできない
  */
 export function demoLoginAllowed() {
-  if (process.env.DEMO_LOGIN !== "true") return false;
-  return process.env.NODE_ENV !== "production" || process.env.DEMO_ENVIRONMENT === "true";
+  if (process.env.NODE_ENV === "production") return process.env.DEMO_ENVIRONMENT === "true";
+  return process.env.DEMO_LOGIN === "true" || process.env.DEMO_ENVIRONMENT === "true";
 }
 export const DEMO_EMAIL_DOMAIN = "@demo.invalid";
 function demoUserOnly() {

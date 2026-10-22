@@ -417,3 +417,17 @@ export async function refreshActionCards(db: DB, actor?: Actor, now = new Date()
   });
   return { created, resolved, total: findings.length };
 }
+
+let lastLocalRefresh = 0;
+/** 画面表示時に、前回の更新から15分以上たっていればカードを更新（定期処理がない環境でも最新に保つ） */
+export async function refreshIfStale(db: DB, now = new Date()) {
+  if (now.getTime() - lastLocalRefresh < 60_000) return;
+  lastLocalRefresh = now.getTime();
+  try {
+    const [{ last }] = (await db.execute<{ last: string | null }>(sql`select max(last_seen_at)::text last from action_card`)).rows;
+    if (last && now.getTime() - new Date(last.replace(" ", "T").replace(/([+-]\d{2})$/, "$1:00")).getTime() < 15 * 60_000) return;
+    await refreshActionCards(db, undefined, now);
+  } catch (e) {
+    console.error("[cards-refresh]", e instanceof Error ? e.name : "unknown");
+  }
+}

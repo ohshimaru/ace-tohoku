@@ -4,7 +4,7 @@ import { Card, Field, FilterBar, PageHeader, Select } from "@/components/ui";
 import { getDb } from "@/db";
 import { guard } from "@/lib/page-guard";
 import { requireStaff } from "@/lib/session";
-import { listActionCards } from "@/server/actions-engine";
+import { listActionCards, refreshIfStale } from "@/server/actions-engine";
 import { refreshCardsAction } from "./actions";
 
 export const metadata = { title: "対応すること" };
@@ -14,6 +14,7 @@ export default async function ActionsPage({ searchParams }: { searchParams: Prom
   const sp = await searchParams;
   return guard(async () => {
     const status = sp.status === "done" ? "done" : sp.status === "all" ? "all" : "active";
+    await refreshIfStale(getDb());
     const cards = await listActionCards(getDb(), actor, { status });
     return (
       <>

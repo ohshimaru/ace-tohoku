@@ -11,7 +11,9 @@ import { formatYen } from "@/lib/money";
 import { guard } from "@/lib/page-guard";
 import { periodFromParams, periodLabel, qs } from "@/lib/period";
 import { requireStaff } from "@/lib/session";
-import { listActionCards } from "@/server/actions-engine";
+import { listActionCards, refreshIfStale } from "@/server/actions-engine";
+import { GettingStarted } from "@/components/getting-started";
+import { guideSteps } from "@/lib/guide";
 import { listBudgetStatus } from "@/server/budget";
 import { listDivisions } from "@/server/masters";
 import { getCashPosition, getPL, getReceivables, getWorkQueue } from "@/server/metrics";
@@ -23,6 +25,7 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
   const sp = await searchParams;
   return guard(async () => {
     const db = getDb();
+    await refreshIfStale(db);
     const divisions = await listDivisions(db, actor);
     const p = periodFromParams(sp);
     const divisionId = p.divisionId ?? (isCompanyWide(actor) ? undefined : divisions[0]?.id);
@@ -42,6 +45,7 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
     return (
       <>
         <PageHeader title="経営ダッシュボード" description={`${scopeName}／${periodLabel(f.from, f.to)}`} />
+        <GettingStarted steps={guideSteps(actor.role, { hasDriverDivision: divisions.some((d) => d.kind === "DRIVER") })} demo={actor.demo} />
         <PeriodFilter from={f.from} to={f.to} divisionId={divisionId} divisions={divisions} />
 
         <Card title="AIからの対応指示" actions={<Link className="text-sm text-navy-700 underline" href="/app/actions">すべて見る</Link>} className="mb-6">

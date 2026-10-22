@@ -1,5 +1,6 @@
 import { createHash, createHmac, randomBytes, scrypt as _scrypt, timingSafeEqual } from "node:crypto";
 import { promisify } from "node:util";
+import { databaseUrl } from "./env";
 
 const scrypt = promisify(_scrypt) as (pw: string, salt: Buffer, len: number, opts: { N: number; r: number; p: number }) => Promise<Buffer>;
 const PARAMS = { N: 16384, r: 8, p: 1 };
@@ -36,8 +37,12 @@ export function sha256(s: string) {
 
 function secret() {
   const s = process.env.APP_SECRET;
-  if (!s || s.length < 32) throw new Error("APP_SECRET（32文字以上）が設定されていません");
-  return s;
+  if (s && s.length >= 32) return s;
+  if (s) throw new Error("APP_SECRET は32文字以上にしてください");
+  // 未設定の場合は、データベースの接続情報（同等の秘密）から導出する（Vercel で設定項目を減らすため）
+  const db = databaseUrl();
+  if (!db) throw new Error("APP_SECRET（32文字以上）が設定されていません");
+  return createHmac("sha256", "ace-tohoku/app-secret/v1").update(db).digest("base64url");
 }
 
 /** 署名付きの値（Cookie に入れる一時データ用） */

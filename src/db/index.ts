@@ -1,5 +1,6 @@
 import { drizzle, type NodePgDatabase } from "drizzle-orm/node-postgres";
 import { Pool } from "pg";
+import { databaseUrl } from "@/lib/env";
 import * as schema from "./schema";
 
 export type DB = NodePgDatabase<typeof schema>;
@@ -9,7 +10,7 @@ export type Tx = Parameters<Parameters<DB["transaction"]>[0]>[0] | DB;
 const globalForDb = globalThis as unknown as { __bohPool?: Pool; __bohDb?: DB };
 
 function createDb(): DB {
-  const url = process.env.DATABASE_URL;
+  const url = databaseUrl();
   if (!url) throw new Error("DATABASE_URL が設定されていません（.env を確認してください）");
   const pool = globalForDb.__bohPool ?? new Pool({ connectionString: url, max: 10 });
   globalForDb.__bohPool = pool;

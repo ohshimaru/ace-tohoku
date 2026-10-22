@@ -1,4 +1,4 @@
-/** 非公開ファイル保存（local / supabase）。取得時は必ず呼び出し側で権限を確認する */
+/** 非公開ファイル保存（local / db / supabase）。取得時は必ず呼び出し側で権限を確認する */
 import { mkdir, readFile, rename, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { invalid } from "@/lib/errors";
@@ -26,9 +26,17 @@ export function safeName(name: string) {
   return (path.basename(name || "file").replace(/[\u0000-\u001f\\/:*?"<>|]/g, "_").slice(0, 120)) || "file";
 }
 
-export type StorageDriver = "local" | "supabase";
+export type StorageDriver = "local" | "db" | "supabase";
+/** 未指定のとき: Vercel（書き込めるディスクがない）ではデータベースに保存、それ以外はローカルディスク */
 export function storageDriver(): StorageDriver {
-  return process.env.STORAGE_DRIVER === "supabase" ? "supabase" : "local";
+  const d = process.env.STORAGE_DRIVER;
+  if (d === "supabase" || d === "db" || d === "local") return d;
+  return process.env.VERCEL ? "db" : "local";
+}
+
+async function blobTable() {
+  const [{ getDb }, { storedBlob }, { eq }] = await Promise.all([import("@/db"), import("@/db/schema"), import("drizzle-orm")]);
+  return { db: getDb(), storedBlob, eq };
 }
 
 function localRoot() {
@@ -55,6 +63,12 @@ export async function putObject(folder: string, bytes: Uint8Array, mime: string)
     if (error) throw new Error(`ファイル保存に失敗しました: ${error.message}`);
     return key;
   }
+  if (storageDriver() === "db") {
+    keyPath(key);
+    const { db, storedBlob } = await blobTable();
+    await db.insert(storedBlob).values({ key, bytes: Buffer.from(bytes) });
+    return key;
+  }
   const p = keyPath(key);
   await mkdir(path.dirname(p), { recursive: true, mode: 0o700 });
   await writeFile(`${p}.tmp`, bytes, { mode: 0o600 });
@@ -69,6 +83,13 @@ export async function getObject(key: string): Promise<Buffer> {
     if (error || !data) throw new Error("ファイルを取得できませんでした");
     return Buffer.from(await data.arrayBuffer());
   }
+  if (storageDriver() === "db") {
+    keyPath(key);
+    const { db, storedBlob, eq } = await blobTable();
+    const [r] = await db.select().from(storedBlob).where(eq(storedBlob.key, key)).limit(1);
+    if (!r) throw new Error("ファイルを取得できませんでした");
+    return Buffer.from(r.bytes);
+  }
   return readFile(keyPath(key));
 }
 
@@ -76,6 +97,11 @@ export async function deleteObject(key: string) {
   if (storageDriver() === "supabase") {
     const { client, bucket } = await supabase();
     await client.storage.from(bucket).remove([key]);
+    return;
+  }
+  if (storageDriver() === "db") {
+    const { db, storedBlob, eq } = await blobTable();
+    await db.delete(storedBlob).where(eq(storedBlob.key, key));
     return;
   }
   await unlink(keyPath(key)).catch(() => undefined);

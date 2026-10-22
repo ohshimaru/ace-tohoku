@@ -14,7 +14,8 @@
     "db:migrate": "tsx scripts/migrate.ts",
     "db:seed-demo": "tsx --conditions=react-server scripts/seed-demo.ts",
     "admin:create": "tsx --conditions=react-server scripts/create-admin.ts",
-    "db:seed": "tsx --conditions=react-server scripts/seed-initial.ts"
+    "db:seed": "tsx --conditions=react-server scripts/seed-initial.ts",
+    "vercel-build": "bash scripts/prepare-deploy.sh"
   },
   "dependencies": {
     "@expo-google-fonts/noto-sans-jp": "0.4.4",

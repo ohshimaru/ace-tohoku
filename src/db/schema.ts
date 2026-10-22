@@ -9,6 +9,7 @@ import {
   bigserial,
   boolean,
   check,
+  customType,
   date,
   index,
   integer,
@@ -1083,3 +1084,15 @@ export const auditLog = pgTable(
   },
   (t) => [index("audit_entity_idx").on(t.entityType, t.entityId), index("audit_at_idx").on(t.at)],
 );
+
+/* ================================================================== */
+/* ファイル本体（STORAGE_DRIVER=db のとき。Vercel など書き込めるディスクがない環境用） */
+/* ================================================================== */
+
+const bytea = customType<{ data: Buffer; driverData: Buffer }>({ dataType: () => "bytea" });
+
+export const storedBlob = pgTable("stored_blob", {
+  key: text("key").primaryKey(),
+  bytes: bytea("bytes").notNull(),
+  createdAt: createdAt(),
+});

@@ -35,6 +35,8 @@
 
 html {
   -webkit-text-size-adjust: 100%;
+  /* 全体の文字を少し大きく（17px基準）。表や注記も読みやすくする */
+  font-size: 106.25%;
 }
 
 body {

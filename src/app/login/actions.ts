@@ -3,6 +3,7 @@
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { getDb } from "@/db";
+import { trustedIpHeader } from "@/lib/env";
 import { type ActionResult, str } from "@/lib/action";
 import { AppError } from "@/lib/errors";
 import { clearSessionCookie, getActor, setSessionCookie } from "@/lib/session";
@@ -11,7 +12,7 @@ import { cookies } from "next/headers";
 
 async function clientIp() {
   const h = await headers();
-  const trusted = process.env.TRUSTED_IP_HEADER;
+  const trusted = trustedIpHeader();
   return (trusted && h.get(trusted)?.split(",")[0]?.trim()) || "direct";
 }
 

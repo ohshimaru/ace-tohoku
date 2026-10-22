@@ -14,13 +14,13 @@ export function ActionCardList({ cards, compact = false }: { cards: Row[]; compa
   return (
     <ul className="space-y-3">
       {cards.map(({ c, assigneeName }) => (
-        <li key={c.id} className="rounded-md border border-line p-3">
+        <li key={c.id} className={`rounded-md border border-line border-l-4 bg-surface p-4 ${c.priority === 1 ? "border-l-bad" : c.priority === 2 ? "border-l-warn" : "border-l-navy-200"}`}>
           <div className="flex flex-wrap items-center gap-2">
             <Badge tone={L.priority[c.priority][1]}>優先度 {L.priority[c.priority][0]}</Badge>
             <Badge tone={L.action[c.status][1]}>{L.action[c.status][0]}</Badge>
             {c.needsTaxReview && <Badge tone="warn">税務は要確認</Badge>}
-            <span className="font-bold text-navy-900">{c.title}</span>
           </div>
+          <p className="mt-1.5 text-base font-bold leading-snug text-navy-900">{c.title}</p>
           <p className="mt-1 text-sm">{c.finding}</p>
           <dl className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted">
             {c.evidence.map((e) => (
@@ -28,12 +28,12 @@ export function ActionCardList({ cards, compact = false }: { cards: Row[]; compa
             ))}
             <div><dt className="inline">対象期間：</dt><dd className="inline">{c.periodLabel}</dd></div>
           </dl>
-          {!compact && <p className="mt-2 text-sm"><b>推奨する対応：</b>{c.recommendation}</p>}
+          <p className="mt-2 rounded bg-navy-50 px-3 py-2 text-sm"><b>次にやること：</b>{c.recommendation}</p>
           <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-2 text-xs">
             <span>担当：{assigneeName ?? ROLE_LABELS[c.assigneeRole]}</span>
             {c.dueDate && <span>期限：{formatDate(c.dueDate)}</span>}
             <span className="text-muted">{c.textSource === "LLM" ? "文章: AIで整形" : "文章: ルールベース"}</span>
-            <Link className="text-navy-700 underline" href={c.link}>対象の明細を開く</Link>
+            <Link className="font-bold text-navy-700 underline" href={c.link}>対象を開く →</Link>
             {!compact && c.status !== "DONE" && c.status !== "DISMISSED" && (
               <span className="flex gap-2">
                 {c.status === "OPEN" && <StatusButton id={c.id} status="IN_PROGRESS" label="対応中にする" />}

@@ -8,6 +8,7 @@ import "server-only";
  * コールバックURL: {APP_URL}/api/auth/line/callback を LINE Developers に登録
  */
 import { createHash, randomBytes } from "node:crypto";
+import { appUrl } from "@/lib/env";
 
 const AUTHORIZE = "https://access.line.me/oauth2/v2.1/authorize";
 const TOKEN = "https://api.line.me/oauth2/v2.1/token";
@@ -18,7 +19,7 @@ export function lineConfigured() {
 }
 
 function callbackUrl() {
-  return `${(process.env.APP_URL || "http://localhost:3000").replace(/\/$/, "")}/api/auth/line/callback`;
+  return `${appUrl()}/api/auth/line/callback`;
 }
 
 export type LineFlow = { state: string; nonce: string; verifier: string; invite?: string; at: number };

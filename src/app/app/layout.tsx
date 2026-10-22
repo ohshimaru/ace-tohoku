@@ -16,6 +16,7 @@ function items(a: Actor, q: Awaited<ReturnType<typeof getWorkQueue>>): { group: 
   const g = (group: string, list: (NavItem | false)[]) => ({ group, items: list.filter((x): x is NavItem => !!x) });
   return [
     g("経営", [
+      { href: "/app/guide", label: "使い方", icon: "?" },
       { href: "/app", label: "ダッシュボード", icon: "▦" },
       { href: "/app/actions", label: "対応すること", icon: "✔" },
       { href: "/app/divisions", label: "事業部", icon: "◫" },

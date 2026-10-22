@@ -12,6 +12,7 @@ import { emailDriver, PermanentEmailError, sendMail } from "@/adapters/email";
 import { type Actor, can, divisionScope, isStaff } from "@/lib/access";
 import { addDays, formatDateTime, toJstDate } from "@/lib/dates";
 import { conflict, forbidden, notFound } from "@/lib/errors";
+import { appUrl } from "@/lib/env";
 import { writeAudit } from "./audit";
 
 const BACKOFF_MIN = [5, 15, 60];
@@ -91,7 +92,7 @@ export async function processOutbox(db: DB, now = new Date(), limit = 50) {
 export async function scheduleAvailabilityReminders(db: DB, now = new Date()) {
   const rules = await db.select().from(reminderRule).where(and(eq(reminderRule.kind, "AVAILABILITY"), eq(reminderRule.enabled, true)));
   const periods = await db.select().from(availabilityPeriod).where(eq(availabilityPeriod.status, "OPEN"));
-  const base = (process.env.APP_URL || "http://localhost:3000").replace(/\/$/, "");
+  const base = appUrl();
   let queued = 0;
   for (const p of periods) {
     const deadlineDay = toJstDate(p.deadline);

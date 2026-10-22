@@ -122,11 +122,11 @@ export function Table({ children }: { children: ReactNode }) {
   );
 }
 export function Th({ children, className }: { children?: ReactNode; className?: string }) {
-  return <th className={cx("border-b border-line bg-navy-50 px-3 py-2 text-left text-xs font-bold text-navy-800", className)}>{children}</th>;
+  return <th className={cx("whitespace-nowrap border-b border-line bg-navy-50 px-3 py-2.5 text-left text-[0.8rem] font-bold text-navy-800", className)}>{children}</th>;
 }
 export function Td({ children, className, colSpan }: { children?: ReactNode; className?: string; colSpan?: number }) {
   return (
-    <td colSpan={colSpan} className={cx("border-b border-line px-3 py-2 align-top", className)}>
+    <td colSpan={colSpan} className={cx("border-b border-line px-3 py-2.5 align-top", className)}>
       {children}
     </td>
   );

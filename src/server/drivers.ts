@@ -15,6 +15,7 @@ import { appUser, division, driver, expenseCategory, oneTimeToken, partner, proj
 import { type Actor, can, canAccessDivision, divisionScope } from "@/lib/access";
 import { randomToken, sha256 } from "@/lib/crypto";
 import { conflict, forbidden, invalid, isUniqueViolation, notFound } from "@/lib/errors";
+import { appUrl } from "@/lib/env";
 import { writeAudit } from "./audit";
 import { createSession, revokeUserSessions } from "./auth";
 import { enqueueEmail } from "./mailer";
@@ -23,9 +24,7 @@ import { parse, zText } from "./validate";
 const INVITE_HOURS = 72;
 const VERIFY_HOURS = 24;
 
-export function appUrl() {
-  return (process.env.APP_URL || "http://localhost:3000").replace(/\/$/, "");
-}
+export { appUrl } from "@/lib/env";
 
 function requireManage(actor: Actor, divisionId: string) {
   if (!can.manageDrivers(actor) || !canAccessDivision(actor, divisionId)) throw forbidden("この事業部のドライバーを管理する権限がありません");
