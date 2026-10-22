@@ -15,7 +15,7 @@ export async function setActionStatusAction(_: ActionResult, fd: FormData) {
   });
 }
 
-export async function refreshCardsAction(_: ActionResult) {
+export async function refreshCardsAction() {
   return runAction(async () => {
     const r = await refreshActionCards(getDb(), await requireActorForAction());
     revalidatePath("/app/actions");

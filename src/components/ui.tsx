@@ -109,7 +109,7 @@ export function Notice({ tone = "info", title, children }: { tone?: Exclude<Tone
   return (
     <div role={tone === "bad" ? "alert" : "status"} className={cx("rounded-md border px-4 py-3 text-sm", tones[tone])}>
       {title && <p className="font-bold">{title}</p>}
-      <div className={title ? "mt-1" : ""}>{children}</div>
+      <div className={cx("whitespace-pre-line [overflow-wrap:anywhere]", title && "mt-1")}>{children}</div>
     </div>
   );
 }

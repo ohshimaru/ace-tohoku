@@ -78,7 +78,7 @@ export default async function SalesPage({ searchParams }: { searchParams: SP }) 
         </Card>
         <Card title="CSVで取り込む" className="mt-6">
           <ActionForm action={importSalesAction} submitLabel="取り込む" submitVariant="secondary">
-            <Field label="CSVファイル（UTF-8）" hint={<>見出し行が必要です。<a className="underline" href="/api/csv/sales-template">テンプレートをダウンロード</a>。1行でも誤りがあれば全件取り込みません。「外部ID」が同じ行は2回目以降スキップします。</>}>
+            <Field label="CSVファイル（UTF-8）" hint={<>見出し行が必要です。<a className="underline" href={"/api/csv/sales-template"} download>テンプレートをダウンロード</a>。1行でも誤りがあれば全件取り込みません。「外部ID」が同じ行は2回目以降スキップします。</>}>
               <Input type="file" name="file" accept=".csv,text/csv" required />
             </Field>
           </ActionForm>

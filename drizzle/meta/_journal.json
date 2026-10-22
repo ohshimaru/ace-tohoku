@@ -15,6 +15,13 @@
       "when": 1792681283638,
       "tag": "0001_protections",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1792682685031,
+      "tag": "0002_assignment_no_overlap",
+      "breakpoints": true
     }
   ]
 }

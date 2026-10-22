@@ -108,3 +108,13 @@ export function fiscalYearRange(fy: number, startMonth: number): [string, string
 export function monthOf(date: string) {
   return date.slice(0, 7);
 }
+
+const WEEKDAYS = ["日", "月", "火", "水", "木", "金", "土"];
+/** YYYY-MM-DD の曜日（日本語1文字） */
+export function weekdayJa(date: string): string {
+  return WEEKDAYS[new Date(`${date}T12:00:00Z`).getUTCDay()];
+}
+export function isWeekend(date: string): boolean {
+  const d = new Date(`${date}T12:00:00Z`).getUTCDay();
+  return d === 0 || d === 6;
+}

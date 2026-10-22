@@ -4,7 +4,7 @@
  * - 承認済み経費は対象事業部の経費・予算に一度だけ反映（状態から集計）
  * - 支払: 別払い・会社直接払いは承認時に支払予定を1件作成（一意制約）。稼働明細で精算する経費は明細経由で支払う
  */
-import { and, asc, desc, eq, gte, ilike, inArray, isNull, lte, or, sql, type SQL } from "drizzle-orm";
+import { and, asc, desc, eq, ilike, inArray, isNull, or, sql, type SQL } from "drizzle-orm";
 import { z } from "zod";
 import type { DB, Tx } from "@/db";
 import { appUser, budgetCommitment, division, driver, expense, expenseCategory, payable, project, storedFile } from "@/db/schema";

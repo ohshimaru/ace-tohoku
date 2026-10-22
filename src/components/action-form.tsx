@@ -22,7 +22,7 @@ export function ActionForm({
   action: Action;
   children?: ReactNode;
   submitLabel?: string;
-  submitVariant?: "primary" | "secondary" | "danger";
+  submitVariant?: "primary" | "secondary" | "danger" | "ghost";
   confirm?: string;
   resetOnSuccess?: boolean;
   className?: string;
@@ -56,10 +56,34 @@ export function ActionForm({
   );
 }
 
-function Submit({ label, variant }: { label: string; variant: "primary" | "secondary" | "danger" }) {
+function Submit({ label, variant }: { label: string; variant: "primary" | "secondary" | "danger" | "ghost" }) {
   const { pending } = useFormStatus();
   return (
     <Button type="submit" variant={variant} disabled={pending} aria-busy={pending}>
+      {pending ? "処理中…" : label}
+    </Button>
+  );
+}
+
+/** 「下書き保存」と「提出」の2つのボタンを持つフォーム（押したボタンの name=submit の値で区別） */
+export function DualActionForm({ action, children, draftLabel = "下書き保存", submitLabel = "提出する", confirmSubmit, className }: { action: Action; children?: ReactNode; draftLabel?: string; submitLabel?: string; confirmSubmit?: string; className?: string }) {
+  const [state, formAction] = useActionState(action, { ok: false, message: "", at: 0 });
+  return (
+    <form action={formAction} className={className ?? "space-y-4"}>
+      {children}
+      {state.at > 0 && <Notice tone={state.ok ? "ok" : "bad"} key={state.at}>{state.message}</Notice>}
+      <div className="grid grid-cols-2 gap-2">
+        <NamedSubmit value="0" label={draftLabel} variant="secondary" />
+        <NamedSubmit value="1" label={submitLabel} variant="primary" confirm={confirmSubmit} />
+      </div>
+    </form>
+  );
+}
+
+function NamedSubmit({ value, label, variant, confirm }: { value: string; label: string; variant: "primary" | "secondary"; confirm?: string }) {
+  const { pending } = useFormStatus();
+  return (
+    <Button type="submit" name="submit" value={value} variant={variant} disabled={pending} aria-busy={pending} onClick={(e) => { if (confirm && !window.confirm(confirm)) e.preventDefault(); }}>
       {pending ? "処理中…" : label}
     </Button>
   );
