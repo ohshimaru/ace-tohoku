@@ -28,15 +28,15 @@ export function GettingStarted({ steps, demo }: { steps: GuideStep[]; demo: bool
       </div>
       <ol className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-4">
         {steps.map((s, i) => (
-          <li key={s.href} className="flex flex-col rounded-md border border-line p-4">
+          <li key={s.href} className="flex flex-col rounded-md border border-line p-3 sm:p-4">
             <p className="text-xs font-bold text-navy-500">ステップ {i + 1}</p>
             <p className="mt-1 font-bold text-navy-900">{s.title}</p>
-            <p className="mt-1 flex-1 text-sm text-muted">{s.body}</p>
+            <p className="mt-1 hidden flex-1 text-sm text-muted sm:block">{s.body}</p>
             <Link href={s.href} className="mt-3 inline-flex min-h-10 items-center justify-center rounded-md bg-navy-700 px-3 text-sm font-bold text-white hover:bg-navy-800">{s.cta}</Link>
           </li>
         ))}
       </ol>
-      {demo && <p className="mt-3 text-sm">ほかの立場（経理・事業部責任者・ドライバー）で試すときは、左下の「ログアウト」から別の人を選んでください。ドライバー画面はスマホでの表示を想定しています。</p>}
+      {demo && <p className="mt-3 text-sm">ほかの立場（経理・事業部責任者・ドライバー）で試すときは、メニューの一番下にある「ログアウト」から別の人を選んでください。ドライバー画面はスマホでの表示を想定しています。</p>}
     </section>
   );
 }

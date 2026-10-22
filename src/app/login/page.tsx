@@ -16,21 +16,36 @@ export default async function LoginPage() {
   if (a) redirect(a.role === "DRIVER" ? "/d" : "/app");
   const db = getDb();
   const [s, demo] = await Promise.all([getSettings(db), listDemoUsers(db)]);
+  const form = (
+    <ActionForm action={loginAction} submitLabel="ログイン" className="space-y-4 [&_button[type=submit]]:w-full">
+      <Field label="メールアドレス"><Input type="email" name="email" autoComplete="username" required /></Field>
+      <Field label="パスワード"><Input type="password" name="password" autoComplete="current-password" required /></Field>
+    </ActionForm>
+  );
   return (
     <main className="flex min-h-screen items-center justify-center bg-navy-900 px-4 py-10">
-      <div className="w-full max-w-sm">
+      <div className={demo.length > 0 ? "w-full max-w-3xl" : "w-full max-w-md"}>
         <div className="mb-6 text-center text-white">
           <p className="text-sm text-navy-200">{s.companyName}</p>
           <h1 className="mt-1 text-2xl font-bold tracking-wide">{s.appName}</h1>
-          <p className="mt-1 text-xs text-navy-300">会社側ログイン</p>
+          <p className="mt-1 text-xs text-navy-300">{demo.length > 0 ? "体験版" : "会社側ログイン"}</p>
         </div>
         <div className="rounded-lg bg-white p-6 shadow-xl">
-          <ActionForm action={loginAction} submitLabel="ログイン" className="space-y-4 [&_button[type=submit]]:w-full">
-            <Field label="メールアドレス"><Input type="email" name="email" autoComplete="username" required /></Field>
-            <Field label="パスワード"><Input type="password" name="password" autoComplete="current-password" required /></Field>
-          </ActionForm>
-          <p className="mt-4 text-xs text-muted">ドライバーの方は <a className="text-navy-700 underline" href="/d/login">こちら（LINEでログイン）</a></p>
-          <DemoLogin users={demo.filter((u) => u.role !== "DRIVER")} />
+          {demo.length > 0 ? (
+            <>
+              <p className="rounded-md bg-warn-bg px-3 py-2 text-sm font-bold text-warn">体験版です。表示されるデータはすべて架空です。</p>
+              <DemoLogin users={demo} />
+              <details className="mt-6 border-t border-line pt-4">
+                <summary className="cursor-pointer text-sm text-navy-700">メールアドレスとパスワードでログイン</summary>
+                <div className="mt-3">{form}</div>
+              </details>
+            </>
+          ) : (
+            <>
+              {form}
+              <p className="mt-4 text-xs text-muted">ドライバーの方は <a className="text-navy-700 underline" href="/d/login">こちら（LINEでログイン）</a></p>
+            </>
+          )}
         </div>
       </div>
     </main>
