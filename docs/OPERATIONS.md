@@ -9,7 +9,7 @@ Clean Up と同じ構成です。**作成・課金・APIキーの発行・本番
 2. **データベース**: Supabase で新しいプロジェクトを作成（Clean Up とは別のプロジェクト。リージョンは東京）
    - 接続文字列（Transaction pooler）→ `DATABASE_URL`、直結（Session / Direct）→ `MIGRATE_DATABASE_URL`
    - Storage で非公開バケット `private-files` を作成 → `SUPABASE_URL`・`SUPABASE_SERVICE_ROLE_KEY`・`STORAGE_DRIVER=supabase`
-3. **Vercel**: 新しいプロジェクトとしてリポジトリを Import（Framework: Next.js、リージョン hnd1 は vercel.json で指定済み）
+3. **Vercel**: 新しいプロジェクトとしてリポジトリを Import（Framework: Next.js、リージョンはデータベース（Neon・シンガポール）に合わせて sin1 を vercel.json で指定済み）
    - Environment Variables に `.env.example` の項目を設定（`APP_URL` は公開URL、`APP_SECRET`・`CRON_SECRET` はランダムな長い値、`TRUSTED_IP_HEADER=x-forwarded-for`）
 4. **初回のDB準備**（手元のPCから、本番DBのURLを環境変数で渡して実行）
    ```bash
