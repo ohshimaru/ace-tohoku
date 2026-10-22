@@ -12,11 +12,9 @@
     "test:e2e": "tsx e2e/run.ts",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "tsx scripts/migrate.ts",
-    "db:seed-demo": "tsx scripts/seed-demo.ts",
-    "admin:create": "tsx scripts/create-admin.ts",
-    "db:backup": "bash scripts/backup/backup.sh",
-    "db:restore": "bash scripts/backup/restore.sh",
-    "test:smoke": "tsx e2e/smoke.ts"
+    "db:seed-demo": "tsx --conditions=react-server scripts/seed-demo.ts",
+    "admin:create": "tsx --conditions=react-server scripts/create-admin.ts",
+    "db:seed": "tsx --conditions=react-server scripts/seed-initial.ts"
   },
   "dependencies": {
     "@expo-google-fonts/noto-sans-jp": "0.4.4",

@@ -80,12 +80,23 @@ export function formatDate(s: string | null | undefined): string {
   return `${y}/${m}/${d}`;
 }
 
-export function formatTime(d: Date | null | undefined): string {
-  return d ? hmFmt.format(d) : "—";
+/** DBの生SQLでは日時が文字列（例: 2026-10-28 09:00:00+00）で返るため、Date に揃える */
+export function toDateValue(d: Date | string | null | undefined): Date | null {
+  if (!d) return null;
+  if (d instanceof Date) return Number.isNaN(d.getTime()) ? null : d;
+  const s = d.replace(" ", "T").replace(/([+-]\d{2})$/, "$1:00");
+  const v = new Date(s);
+  return Number.isNaN(v.getTime()) ? null : v;
 }
 
-export function formatDateTime(d: Date | null | undefined): string {
-  return d ? dtFmt.format(d) : "—";
+export function formatTime(d: Date | string | null | undefined): string {
+  const v = toDateValue(d);
+  return v ? hmFmt.format(v) : "—";
+}
+
+export function formatDateTime(d: Date | string | null | undefined): string {
+  const v = toDateValue(d);
+  return v ? dtFmt.format(v) : "—";
 }
 
 export function formatMinutes(min: number): string {

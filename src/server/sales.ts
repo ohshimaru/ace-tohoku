@@ -199,6 +199,9 @@ export async function addReceipt(db: DB, actor: Actor, raw: z.input<typeof recei
       if (dup) return { id: dup.id, duplicated: true };
       const [s] = await tx.select().from(sale).where(eq(sale.id, input.saleId)).for("update");
       if (!s) throw notFound("売上が見つかりません");
+      // 同時に同じ入金が登録された場合: 行ロックの待ち明けに再確認（二重登録・誤った残高エラーを防ぐ）
+      const [dup2] = await tx.select({ id: receipt.id }).from(receipt).where(eq(receipt.idempotencyKey, input.idempotencyKey)).limit(1);
+      if (dup2) return { id: dup2.id, duplicated: true };
       if (s.canceledAt) throw invalid("取消済みの売上には入金を登録できません");
       await assertMonthOpen(tx, input.receivedOn.slice(0, 7), "入金");
       const remaining = s.amountExTax + s.taxAmount - (await receivedTotal(tx, s.id));

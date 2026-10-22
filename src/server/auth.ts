@@ -1,5 +1,5 @@
-/** 認証（セッション・パスワード・ログイン試行制限）。LINE ログインは line-login.ts */
-import { and, count, eq, gt, inArray, lt } from "drizzle-orm";
+/** 認証（セッション・パスワード・ログイン試行制限） */
+import { and, count, eq, gt, inArray, like, lt } from "drizzle-orm";
 import type { DB, Tx } from "@/db";
 import { appUser, loginAttempt, session, userDivision } from "@/db/schema";
 import type { Actor, Role } from "@/lib/access";
@@ -10,9 +10,20 @@ import { writeAudit } from "./audit";
 export const SESSION_COOKIE = "an_session";
 export const SESSION_DAYS = 14;
 
-/** 本番ではデモログインを絶対に許可しない */
+/**
+ * デモログイン（パスワードなしで利用者を選んでログイン）
+ * - 開発環境: DEMO_LOGIN=true のときだけ
+ * - 本番ビルド: 実データの本番では使えない。架空データだけの「デモ環境」として公開する場合に限り、
+ *   DEMO_LOGIN=true と DEMO_ENVIRONMENT=true の両方を設定したときだけ有効。
+ *   その場合もデモ用アカウント（@demo.invalid）以外にはデモログインできない
+ */
 export function demoLoginAllowed() {
-  return process.env.NODE_ENV !== "production" && process.env.DEMO_LOGIN === "true";
+  if (process.env.DEMO_LOGIN !== "true") return false;
+  return process.env.NODE_ENV !== "production" || process.env.DEMO_ENVIRONMENT === "true";
+}
+export const DEMO_EMAIL_DOMAIN = "@demo.invalid";
+function demoUserOnly() {
+  return process.env.NODE_ENV === "production";
 }
 
 export async function createSession(db: Tx, userId: string, opts: { demo?: boolean } = {}) {
@@ -94,6 +105,7 @@ export async function demoLogin(db: DB, userId: string) {
   if (!demoLoginAllowed()) throw new AppError("FORBIDDEN", "デモログインはこの環境では使えません");
   const [u] = await db.select().from(appUser).where(and(eq(appUser.id, userId), eq(appUser.status, "ACTIVE"))).limit(1);
   if (!u) throw new AppError("NOT_FOUND", "利用者が見つかりません");
+  if (demoUserOnly() && !u.email?.endsWith(DEMO_EMAIL_DOMAIN)) throw new AppError("FORBIDDEN", "デモ用アカウント以外はデモログインできません");
   return db.transaction(async (tx) => {
     const token = await createSession(tx, u.id, { demo: true });
     await writeAudit(tx, { userId: u.id, name: u.name }, { action: "auth.demo_login", entityType: "app_user", entityId: u.id, summary: "デモログイン（開発環境）" });
@@ -103,5 +115,9 @@ export async function demoLogin(db: DB, userId: string) {
 
 export async function listDemoUsers(db: DB) {
   if (!demoLoginAllowed()) return [];
-  return db.select({ id: appUser.id, name: appUser.name, role: appUser.role }).from(appUser).where(and(eq(appUser.status, "ACTIVE"), inArray(appUser.role, ["OWNER", "ACCOUNTING", "MANAGER", "DRIVER"]))).orderBy(appUser.role, appUser.name);
+  return db
+    .select({ id: appUser.id, name: appUser.name, role: appUser.role })
+    .from(appUser)
+    .where(and(eq(appUser.status, "ACTIVE"), inArray(appUser.role, ["OWNER", "ACCOUNTING", "MANAGER", "DRIVER"]), demoUserOnly() ? like(appUser.email, `%${DEMO_EMAIL_DOMAIN}`) : undefined))
+    .orderBy(appUser.role, appUser.name);
 }

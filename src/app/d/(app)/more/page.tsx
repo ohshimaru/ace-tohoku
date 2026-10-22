@@ -6,6 +6,7 @@ export const metadata = { title: "その他" };
 const ITEMS = [
   { href: "/d/statements", label: "稼働明細", desc: "毎月の明細の確認・PDF/Excel・問い合わせ" },
   { href: "/d/expenses", label: "立替経費", desc: "燃料代などの立替の申請" },
+  { href: "/d/contracts", label: "契約書", desc: "締結済みの業務委託契約書" },
   { href: "/d/profile", label: "メールアドレス・登録情報", desc: "リマインドの送信先の登録" },
 ];
 

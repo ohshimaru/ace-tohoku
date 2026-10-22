@@ -10,7 +10,7 @@ import { asc, inArray, isNull, sql } from "drizzle-orm";
 import type { DB, Tx } from "@/db";
 import { allocationRule, allocationShare, division } from "@/db/schema";
 import { type Actor, can, canAccessDivision, divisionScope, isStaff } from "@/lib/access";
-import { addDays, addMonths, currentMonthJst, monthsBetween, todayJst } from "@/lib/dates";
+import { addDays, addMonths, currentMonthJst, monthsBetween, toDateValue, todayJst } from "@/lib/dates";
 import { forbidden } from "@/lib/errors";
 import { allocate } from "@/lib/money";
 import { getSettings } from "./masters";
@@ -174,7 +174,7 @@ export async function getCashPosition(db: DB, actor: Actor) {
            coalesce(sum(amount) filter (where due_date < ${today}), 0)::float8 overdue,
            coalesce(sum(amount), 0)::float8 total
     from payable where status = 'SCHEDULED'`)).rows;
-  const lastSync = accounts.rows.reduce<Date | null>((m, a) => (a.last_synced_at && (!m || a.last_synced_at > m) ? a.last_synced_at : m), null);
+  const lastSync = accounts.rows.map((a) => toDateValue(a.last_synced_at)).reduce<Date | null>((m, d) => (d && (!m || d > m) ? d : m), null);
   return {
     accounts: accounts.rows,
     bankTotal,
@@ -238,7 +238,7 @@ export async function getWorkQueue(db: DB, actor: Actor, month = currentMonthJst
         where u.status = 'ACTIVE' ${divCond("d.division_id")}
         and not exists (select 1 from availability_submission x where x.driver_id = d.user_id and x.month = p.month and x.status = 'SUBMITTED'))::int unsubmitted
     from availability_period p where p.status = 'OPEN' order by p.month`);
-  return { ...q, availability: periods.rows };
+  return { ...q, availability: periods.rows.map((r) => ({ ...r, deadline: toDateValue(r.deadline) })) };
 }
 
 /* ---------------- 明細へのドリルダウン ---------------- */

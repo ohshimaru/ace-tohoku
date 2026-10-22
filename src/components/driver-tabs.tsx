@@ -11,7 +11,7 @@ const TABS = [
   { href: "/d/reports", label: "日報", icon: "✐" },
   { href: "/d/more", label: "その他", icon: "≡" },
 ];
-const MORE = ["/d/more", "/d/expenses", "/d/statements", "/d/profile"];
+const MORE = ["/d/more", "/d/expenses", "/d/statements", "/d/profile", "/d/contracts"];
 
 export function DriverTabs() {
   const path = usePathname();

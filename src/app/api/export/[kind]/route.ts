@@ -3,6 +3,7 @@ import { getDb } from "@/db";
 import { getActor } from "@/lib/session";
 import { AppError } from "@/lib/errors";
 import { scheduleWorkbook, type ScheduleScope, statementWorkbook } from "@/server/exports";
+import { contractPdf } from "@/server/contract-pdf";
 import { statementPdf } from "@/server/statement-pdf";
 
 export const dynamic = "force-dynamic";
@@ -45,6 +46,12 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ kind
       }
       const r = await statementWorkbook(db, actor, id);
       return file(r.buffer, r.name, XLSX);
+    }
+    if (kind === "contract") {
+      const id = sp.get("id") ?? "";
+      if (!UUID.test(id)) return NextResponse.json({ error: "対象が正しくありません" }, { status: 400 });
+      const r = await contractPdf(db, actor, id);
+      return file(r.buffer, r.name, "application/pdf");
     }
     return NextResponse.json({ error: "不明な出力です" }, { status: 404 });
   } catch (e) {
