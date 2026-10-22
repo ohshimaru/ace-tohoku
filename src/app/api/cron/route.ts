@@ -13,5 +13,5 @@ export async function GET(req: NextRequest) {
   const want = `Bearer ${secret}`;
   if (!secret || got.length !== want.length || !timingSafeEqual(Buffer.from(got), Buffer.from(want))) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   const r = await runScheduledJobs(getDb());
-  return NextResponse.json({ ok: true, reminders: r.reminders, mail: r.mail });
+  return NextResponse.json({ ok: true, reminders: r.reminders, mail: r.mail, slack: r.slack.status });
 }

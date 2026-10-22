@@ -1096,3 +1096,35 @@ export const storedBlob = pgTable("stored_blob", {
   bytes: bytea("bytes").notNull(),
   createdAt: createdAt(),
 });
+
+/* ================================================================== */
+/* Slack への投稿（毎日の要約など）。dedupe_key で1日1回に限定           */
+/* ================================================================== */
+
+export const slackPost = pgTable("slack_post", {
+  id: id(),
+  dedupeKey: text("dedupe_key").notNull().unique(),
+  kind: text("kind").notNull(), // DAILY_DIGEST / TEST
+  status: text("status").notNull().default("PENDING"), // PENDING / SENT / FAILED
+  attempts: integer("attempts").notNull().default(0),
+  lastError: text("last_error"),
+  summary: text("summary").notNull().default(""),
+  sentAt: ts("sent_at"),
+  createdAt: createdAt(),
+});
+
+/** Slack から Claude（ルーティン）への依頼 */
+export const slackRequest = pgTable("slack_request", {
+  id: id(),
+  slackUserId: text("slack_user_id").notNull(),
+  slackUserName: text("slack_user_name").notNull().default(""),
+  channelId: text("channel_id").notNull(),
+  text: text("text").notNull(),
+  responseUrl: text("response_url"),
+  status: text("status").notNull().default("RECEIVED"), // RECEIVED / RUNNING / DONE / FAILED
+  sessionUrl: text("session_url"),
+  result: text("result"),
+  error: text("error"),
+  createdAt: createdAt(),
+  finishedAt: ts("finished_at"),
+});

@@ -95,7 +95,7 @@ async function demoLogin(b: Browser, name: string, path = "/login") {
   return b.submit(p, btn);
 }
 
-const STAFF_PAGES = ["/app", "/app/actions", "/app/divisions", "/app/pl", "/app/budget", "/app/sales", "/app/expenses", "/app/approvals", "/app/payables", "/app/bank", "/app/months", "/app/partners", "/app/projects", "/app/contracts", "/app/contracts/templates", "/app/drivers", "/app/shifts", "/app/reports", "/app/statements", "/app/statements/rates", "/app/reminders", "/app/cleanup", "/app/settings", "/app/audit"];
+const STAFF_PAGES = ["/app", "/app/tasks", "/app/guide", "/app/actions", "/app/divisions", "/app/pl", "/app/budget", "/app/sales", "/app/expenses", "/app/approvals", "/app/payables", "/app/bank", "/app/months", "/app/partners", "/app/projects", "/app/contracts", "/app/contracts/templates", "/app/drivers", "/app/shifts", "/app/reports", "/app/statements", "/app/statements/rates", "/app/reminders", "/app/cleanup", "/app/settings", "/app/audit"];
 const DRIVER_PAGES = ["/d", "/d/availability", "/d/schedule", "/d/reports", "/d/reports/new", "/d/more", "/d/expenses", "/d/expenses/new", "/d/statements", "/d/profile", "/d/contracts"];
 
 async function scenario() {
@@ -249,6 +249,10 @@ async function scenario() {
   check("定期処理（認証あり）", cron.status === 200 && cj.ok);
   const cronNg = await fetch(`${BASE}/api/cron`, { headers: { authorization: "Bearer wrong" } });
   check("定期処理（認証なしは拒否）", cronNg.status === 401);
+  const slackNg = await fetch(`${BASE}/api/slack/command`, { method: "POST", headers: { "content-type": "application/x-www-form-urlencoded", "x-slack-request-timestamp": String(Math.floor(Date.now() / 1000)), "x-slack-signature": "v0=bad" }, body: "text=hello&user_id=U1" });
+  check("Slack /ai（署名なしは拒否）", slackNg.status === 401 || slackNg.status === 403, String(slackNg.status));
+  const resultNg = await fetch(`${BASE}/api/slack/result`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ id: "00000000-0000-0000-0000-000000000000", token: "x", status: "done", result: "x" }) });
+  check("Claude の結果（合言葉なしは拒否）", resultNg.status >= 400 && resultNg.status < 500, String(resultNg.status));
   const mails = await q<{ n: number; skipped: number }>("select count(*)::int n, count(*) filter (where status = 'SKIPPED')::int skipped from email_outbox where kind = 'AVAILABILITY_REMINDER'");
   check("提出済みの人にはリマインドを送らない", (await q<{ n: number }>("select count(*)::int n from email_outbox e join availability_submission s on s.driver_id = e.to_user_id and s.month = e.context->>'month' where e.kind = 'AVAILABILITY_REMINDER' and e.status = 'SENT' and s.submitted_at < e.sent_at"))[0].n === 0, JSON.stringify(mails[0]));
 

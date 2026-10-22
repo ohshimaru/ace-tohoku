@@ -44,6 +44,24 @@ export async function setActionStatus(db: DB, actor: Actor, id: string, status: 
 }
 
 
+/** 担当者を決める（経営者・経理・責任者。担当にできるのは会社側の利用者のみ） */
+export async function setActionAssignee(db: DB, actor: Actor, id: string, userId: string | null) {
+  if (!isStaff(actor)) throw forbidden();
+  await db.transaction(async (tx) => {
+    const [c] = await tx.select().from(actionCard).where(eq(actionCard.id, id)).for("update");
+    const scope = divisionScope(actor);
+    if (!c || (scope && (!c.divisionId || !scope.includes(c.divisionId)))) throw notFound("対応カードが見つかりません");
+    let name = "未定";
+    if (userId) {
+      const [u] = await tx.select({ name: appUser.name, role: appUser.role, status: appUser.status }).from(appUser).where(eq(appUser.id, userId)).limit(1);
+      if (!u || u.role === "DRIVER" || u.status !== "ACTIVE") throw notFound("担当者が見つかりません");
+      name = u.name;
+    }
+    await tx.update(actionCard).set({ assigneeId: userId, updatedById: actor.userId }).where(eq(actionCard.id, id));
+    await writeAudit(tx, actor, { action: "action_card.assign", entityType: "action_card", entityId: id, divisionId: c.divisionId, summary: `対応カード「${c.title}」の担当を${name}に設定` });
+  });
+}
+
 /* ================================================================== */
 /* ルール（根拠の数値はすべてDBの保存データから計算）                   */
 /* ================================================================== */

@@ -18,7 +18,8 @@ function items(a: Actor, q: Awaited<ReturnType<typeof getWorkQueue>>): { group: 
     g("経営", [
       { href: "/app/guide", label: "使い方", icon: "?" },
       { href: "/app", label: "ダッシュボード", icon: "▦" },
-      { href: "/app/actions", label: "対応すること", icon: "✔" },
+      { href: "/app/tasks", label: "タスク", icon: "✔", badge: q.open_tasks },
+      { href: "/app/actions", label: "AIの指摘（詳細）", icon: "✦" },
       { href: "/app/divisions", label: "事業部", icon: "◫" },
       { href: "/app/pl", label: "損益・予実", icon: "≋" },
       { href: "/app/budget", label: "予算", icon: "◔" },

@@ -218,6 +218,7 @@ export async function getWorkQueue(db: DB, actor: Actor, month = currentMonthJst
     missing_reports: number;
     draft_statements: number;
     pending_budget_requests: number;
+    open_tasks: number;
   }>(sql`
     select
       (select count(*) from expense e where e.status = 'SUBMITTED' and e.applicant_id <> ${actor.userId} ${divCond("e.division_id")})::int pending_expenses,
@@ -231,7 +232,9 @@ export async function getWorkQueue(db: DB, actor: Actor, month = currentMonthJst
          ${divCond("p.division_id")})::int missing_reports,
       (select count(*) from statement s where s.status in ('DRAFT', 'REVIEW')
          and exists (select 1 from driver d where d.user_id = s.driver_id ${divCond("d.division_id")}))::int draft_statements,
-      (select count(*) from budget_request b where b.status = 'PENDING' ${divCond("b.division_id")})::int pending_budget_requests`)).rows;
+      (select count(*) from budget_request b where b.status = 'PENDING' ${divCond("b.division_id")})::int pending_budget_requests,
+      (select count(*) from action_card c where c.status in ('OPEN', 'IN_PROGRESS') and c.resolved_at is null
+         ${scope ? sql`and c.rule_key not like 'cash.%'` : sql``} ${divCond("c.division_id")})::int open_tasks`)).rows;
   const periods = await db.execute<{ month: string; deadline: Date; unsubmitted: number }>(sql`
     select p.month, p.deadline,
       (select count(*) from driver d join app_user u on u.id = d.user_id
