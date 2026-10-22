@@ -36,7 +36,7 @@ export default async function InvitePage({ params }: { params: Promise<{ token: 
             {!line && !demo && <Notice tone="warn">LINEログインがまだ設定されていません。会社の担当者にお問い合わせください。</Notice>}
             {demo && (
               <div className="rounded-lg border-2 border-dashed border-warn/50 bg-warn-bg p-4">
-                <p className="mb-2 text-sm font-bold text-warn">デモ（開発環境のみ）: LINEの代わりに模擬IDで連携</p>
+                <p className="mb-2 text-sm font-bold text-warn">デモ（開発環境・デモ環境のみ）: LINEの代わりに模擬IDで連携</p>
                 <ActionForm action={demoBindAction} submitLabel="模擬LINEで連携する" className="space-y-2 [&_button]:w-full">
                   <input type="hidden" name="token" value={token} />
                 </ActionForm>

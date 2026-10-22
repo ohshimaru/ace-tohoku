@@ -100,7 +100,7 @@ export default async function StaffLayout({ children }: { children: React.ReactN
         {(s.demoDataLoadedAt || actor.demo) && (
           <div className="border-b border-warn/30 bg-warn-bg px-4 py-2 text-center text-xs font-bold text-warn" role="status">
             {s.demoDataLoadedAt ? "デモデータ（架空）が入っています。実際の取引ではありません。" : ""}
-            {actor.demo ? " デモログイン中（開発環境のみ）。" : ""}
+            {actor.demo ? " デモログイン中（デモ用アカウント）。" : ""}
           </div>
         )}
         <main className="mx-auto max-w-7xl px-4 py-6 pb-16 sm:px-6">
