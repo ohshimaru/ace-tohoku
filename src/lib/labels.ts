@@ -1,0 +1,21 @@
+type Tone = "neutral" | "ok" | "warn" | "bad" | "info" | "navy";
+export const L = {
+  expenseStatus: { DRAFT: ["下書き", "neutral"], SUBMITTED: ["申請中", "info"], APPROVED: ["承認", "ok"], RETURNED: ["差戻し", "warn"], REJECTED: ["却下", "bad"], CANCELED: ["取消", "bad"] } as Record<string, [string, Tone]>,
+  settlement: { SEPARATE: "別払い（立替精算）", STATEMENT: "稼働明細で精算", COMPANY_PAID: "会社が直接支払" } as Record<string, string>,
+  billing: { UNBILLED: ["未請求", "warn"], BILLED: ["請求済み", "info"], NOT_REQUIRED: ["請求不要", "neutral"] } as Record<string, [string, Tone]>,
+  projectStatus: { PROSPECT: ["見込み", "neutral"], ACTIVE: ["進行中", "info"], PAUSED: ["休止", "warn"], COMPLETED: ["完了", "ok"], CANCELED: ["中止", "bad"] } as Record<string, [string, Tone]>,
+  contractType: { MONTHLY: "月額契約", ONE_OFF: "単発契約" } as Record<string, string>,
+  divisionKind: { GENERAL: "一般", DRIVER: "業務委託（ドライバー）", CLEANING: "清掃（Clean Up連携）" } as Record<string, string>,
+  payable: { SCHEDULED: ["支払予定", "info"], PAID: ["支払済み", "ok"], CANCELED: ["取消", "bad"] } as Record<string, [string, Tone]>,
+  payableSource: { EXPENSE: "経費", STATEMENT: "稼働明細", OTHER: "その他" } as Record<string, string>,
+  userStatus: { INVITED: ["招待中", "info"], PENDING: ["承認待ち", "warn"], ACTIVE: ["利用中", "ok"], SUSPENDED: ["停止", "bad"] } as Record<string, [string, Tone]>,
+  request: { PENDING: ["承認待ち", "info"], APPROVED: ["承認", "ok"], REJECTED: ["却下", "bad"], WITHDRAWN: ["取り下げ", "neutral"] } as Record<string, [string, Tone]>,
+  report: { DRAFT: ["下書き", "neutral"], SUBMITTED: ["提出済み", "info"], APPROVED: ["承認", "ok"], RETURNED: ["差戻し", "warn"] } as Record<string, [string, Tone]>,
+  statement: { DRAFT: ["下書き", "neutral"], REVIEW: ["確認中", "info"], CONFIRMED: ["確定", "ok"], PUBLISHED: ["公開済み", "navy"], SUPERSEDED: ["訂正済み（旧版）", "bad"] } as Record<string, [string, Tone]>,
+  contract: { DRAFT: ["下書き", "neutral"], REVIEWED: ["社内確認済み", "info"], SENT: ["送付済み", "warn"], SIGNED: ["締結済み", "ok"], ENDED: ["終了", "bad"] } as Record<string, [string, Tone]>,
+  bankClass: { UNCLASSIFIED: "未分類", SALES_RECEIPT: "売上入金", EXPENSE_PAYMENT: "経費支払", STATEMENT_PAYMENT: "稼働明細の支払", TRANSFER: "口座間振替", LOAN: "借入・返済", TAX: "税金・社会保険", OTHER: "その他" } as Record<string, string>,
+  rateMethod: { DAILY: "日額", HOURLY: "時間単価", PER_UNIT: "件数単価", MONTHLY: "固定月額" } as Record<string, string>,
+  priority: { 1: ["高", "bad"], 2: ["中", "warn"], 3: ["低", "neutral"] } as Record<number, [string, Tone]>,
+  action: { OPEN: ["未対応", "bad"], IN_PROGRESS: ["対応中", "warn"], DONE: ["完了", "ok"], DISMISSED: ["対象外", "neutral"] } as Record<string, [string, Tone]>,
+  tax: { 10: "10%", 8: "8%（軽減）", 0: "対象外・非課税" } as Record<number, string>,
+};

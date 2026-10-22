@@ -1,0 +1,62 @@
+@import "tailwindcss";
+
+/* 落ち着いたネイビー基調の業務画面 */
+@theme {
+  --font-sans: "Hiragino Sans", "Hiragino Kaku Gothic ProN", "Noto Sans JP", "Yu Gothic UI", "Meiryo", system-ui, sans-serif;
+  --font-mono: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+
+  --color-navy-50: #f2f5fa;
+  --color-navy-100: #e3e9f3;
+  --color-navy-200: #c6d2e6;
+  --color-navy-300: #9cb0d2;
+  --color-navy-400: #6a86b6;
+  --color-navy-500: #47659b;
+  --color-navy-600: #344f81;
+  --color-navy-700: #2a3f68;
+  --color-navy-800: #1f3052;
+  --color-navy-900: #16223c;
+  --color-navy-950: #0e1628;
+
+  --color-surface: #ffffff;
+  --color-canvas: #f5f7fb;
+  --color-line: #dfe5ee;
+  --color-ink: #1a2333;
+  --color-muted: #5b6678;
+
+  --color-ok: #1f7a4d;
+  --color-ok-bg: #e7f4ec;
+  --color-warn: #8a5a00;
+  --color-warn-bg: #fdf3dc;
+  --color-bad: #b42318;
+  --color-bad-bg: #fdecea;
+  --color-info: #2a5db0;
+  --color-info-bg: #e8f0fc;
+}
+
+html {
+  -webkit-text-size-adjust: 100%;
+}
+
+body {
+  background: var(--color-canvas);
+  color: var(--color-ink);
+  font-family: var(--font-sans);
+  font-feature-settings: "palt" 0;
+  line-height: 1.6;
+}
+
+.tabular {
+  font-variant-numeric: tabular-nums;
+}
+
+/* フォーカスを明確に */
+:where(a, button, input, select, textarea, summary):focus-visible {
+  outline: 2px solid var(--color-navy-500);
+  outline-offset: 2px;
+}
+
+input[type="date"],
+input[type="month"],
+input[type="time"] {
+  min-height: 2.5rem;
+}
