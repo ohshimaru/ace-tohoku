@@ -18,7 +18,7 @@ function safe(v: unknown): string | number | null {
   if (v == null) return null;
   if (typeof v === "number") return v;
   const s = String(v);
-  return /^[=+\-@\t\r]/.test(s) ? `'${s}` : s;
+  return /^[\s\u3000]*[=+\-@\t\r＝＋－＠]/.test(s) ? `'${s}` : s;
 }
 
 function header(ws: ExcelJS.Worksheet, cols: { header: string; key: string; width: number }[]) {

@@ -45,6 +45,10 @@ export async function openPeriod(db: DB, actor: Actor, raw: { month: string; dea
   if (raw.divisionId && !canAccessDivision(actor, raw.divisionId)) throw forbidden();
   if (!raw.divisionId && divisionScope(actor)) throw invalid("事業部を選んでください");
   await db.transaction(async (tx) => {
+    // 受付期間は月ごとに1つ。既存の期間が担当外（他事業部・全社）なら変更できない
+    const [cur] = await tx.select().from(availabilityPeriod).where(eq(availabilityPeriod.month, month)).for("update");
+    if (cur && !canAccessDivision(actor, cur.divisionId)) throw forbidden("この月の受付は担当外の事業部（または全社）で設定されています");
+    if (cur && cur.divisionId && (raw.divisionId || null) !== cur.divisionId) throw invalid("この月の受付は別の事業部で設定されています");
     await tx
       .insert(availabilityPeriod)
       .values({ month, deadline, divisionId: raw.divisionId || null, status: "OPEN" })
@@ -56,10 +60,17 @@ export async function openPeriod(db: DB, actor: Actor, raw: { month: string; dea
 export async function closePeriod(db: DB, actor: Actor, month: string) {
   if (actor.role === "DRIVER") throw forbidden();
   await db.transaction(async (tx) => {
-    const [p] = await tx.update(availabilityPeriod).set({ status: "CLOSED" }).where(eq(availabilityPeriod.month, month)).returning();
-    if (!p) throw notFound();
+    const [cur] = await tx.select().from(availabilityPeriod).where(eq(availabilityPeriod.month, month)).for("update");
+    if (!cur || !canAccessDivision(actor, cur.divisionId)) throw notFound("受付期間が見つかりません");
+    await tx.update(availabilityPeriod).set({ status: "CLOSED" }).where(eq(availabilityPeriod.month, month));
     await writeAudit(tx, actor, { action: "availability.close", entityType: "availability_period", entityId: month, summary: `${month}の稼働希望の受付を終了` });
   });
+}
+
+async function periodCovers(tx: Tx, periodDivisionId: string | null, driverId: string) {
+  if (!periodDivisionId) return true;
+  const [d] = await tx.select({ divisionId: driver.divisionId }).from(driver).where(eq(driver.userId, driverId)).limit(1);
+  return d?.divisionId === periodDivisionId;
 }
 
 /* ================================================================== */
@@ -80,7 +91,8 @@ export async function getMyAvailability(db: DB, actor: Actor, month: string) {
   const [sub] = await db.select().from(availabilitySubmission).where(and(eq(availabilitySubmission.driverId, actor.userId), eq(availabilitySubmission.month, month))).limit(1);
   const days = await db.select().from(availability).where(and(eq(availability.driverId, actor.userId), gte(availability.workDate, from), lte(availability.workDate, to))).orderBy(asc(availability.workDate));
   const requests = await db.select().from(availabilityChangeRequest).where(and(eq(availabilityChangeRequest.driverId, actor.userId), gte(availabilityChangeRequest.workDate, from), lte(availabilityChangeRequest.workDate, to))).orderBy(desc(availabilityChangeRequest.createdAt));
-  return { period: period ?? null, submitted: sub?.status === "SUBMITTED", submittedAt: sub?.submittedAt ?? null, days, requests };
+  const covers = period ? await periodCovers(db, period.divisionId, actor.userId) : false;
+  return { period: covers ? period : null, submitted: sub?.status === "SUBMITTED", submittedAt: sub?.submittedAt ?? null, days, requests };
 }
 
 /** 稼働希望の保存（下書き）。複数日まとめて保存できる。提出後は変更申請を使う */
@@ -98,7 +110,7 @@ export async function saveMyAvailability(db: DB, actor: Actor, month: string, ra
   }
   await db.transaction(async (tx) => {
     const [p] = await tx.select().from(availabilityPeriod).where(eq(availabilityPeriod.month, month)).limit(1);
-    if (!p || p.status !== "OPEN") throw invalid("この月の稼働希望は受け付けていません");
+    if (!p || p.status !== "OPEN" || !(await periodCovers(tx, p.divisionId, actor.userId))) throw invalid("この月の稼働希望は受け付けていません");
     const [sub] = await tx.select().from(availabilitySubmission).where(and(eq(availabilitySubmission.driverId, actor.userId), eq(availabilitySubmission.month, month))).for("update");
     if (sub?.status === "SUBMITTED") throw conflict("提出済みです。変更する場合は日ごとに変更申請をしてください");
     for (const d of days) {
@@ -117,7 +129,7 @@ export async function submitMyAvailability(db: DB, actor: Actor, month: string) 
   if (actor.role !== "DRIVER") throw forbidden();
   await db.transaction(async (tx) => {
     const [p] = await tx.select().from(availabilityPeriod).where(eq(availabilityPeriod.month, month)).limit(1);
-    if (!p || p.status !== "OPEN") throw invalid("この月の稼働希望は受け付けていません");
+    if (!p || p.status !== "OPEN" || !(await periodCovers(tx, p.divisionId, actor.userId))) throw invalid("この月の稼働希望は受け付けていません");
     const [from, to] = monthRange(month);
     const [{ n }] = await tx.select({ n: sql<number>`count(*)::int` }).from(availability).where(and(eq(availability.driverId, actor.userId), gte(availability.workDate, from), lte(availability.workDate, to)));
     if (n === 0) throw invalid("1日以上入力してから提出してください");

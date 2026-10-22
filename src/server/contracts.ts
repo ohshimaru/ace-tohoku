@@ -166,6 +166,7 @@ export async function updateContract(db: DB, actor: Actor, id: string, raw: Cont
     const [c] = await tx.select().from(contract).where(eq(contract.id, id)).for("update");
     if (!c || !canAccessDivision(actor, c.divisionId)) throw notFound("契約が見つかりません");
     if (c.status === "ENDED") throw conflict("終了した契約は変更できません");
+    if (input.divisionId !== c.divisionId) throw invalid("契約の事業部は変更できません。新しい契約書を作成してください");
     const t = await validateRefs(tx, actor, input);
     const revise = c.status === "SENT" || c.status === "SIGNED";
     const why = revise ? parse(zText("改訂の理由", 500), reason) : reason.trim() || "下書きの修正";

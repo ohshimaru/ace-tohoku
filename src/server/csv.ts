@@ -13,7 +13,7 @@ import { createSale } from "./sales";
 
 export function csvCell(v: unknown): string {
   let s = v === null || v === undefined ? "" : String(v);
-  if (/^[=+\-@\t\r]/.test(s)) s = `'${s}`;
+  if (/^[\s\u3000]*[=+\-@\t\r＝＋－＠]/.test(s)) s = `'${s}`;
   return /[",\r\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
 }
 

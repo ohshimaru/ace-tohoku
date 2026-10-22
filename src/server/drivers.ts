@@ -174,6 +174,14 @@ export async function updateDriverProfile(db: DB, actor: Actor, userId: string, 
     const [d] = await tx.select().from(driver).where(eq(driver.userId, userId)).for("update");
     if (!d) throw notFound("ドライバーが見つかりません");
     requireManage(actor, d.divisionId);
+    if (input.partnerId) {
+      const [p] = await tx.select({ isContractor: partner.isContractor }).from(partner).where(eq(partner.id, input.partnerId)).limit(1);
+      if (!p?.isContractor) throw invalid("委託先として登録された取引先を選んでください");
+    }
+    if (input.preferredProjectIds.length) {
+      const ok = await tx.select({ id: project.id }).from(project).where(and(inArray(project.id, input.preferredProjectIds), eq(project.divisionId, d.divisionId)));
+      if (ok.length !== new Set(input.preferredProjectIds).size) throw invalid("希望案件は所属事業部の案件から選んでください");
+    }
     const values = {
       qualifications: list(input.qualifications),
       vehicles: list(input.vehicles),

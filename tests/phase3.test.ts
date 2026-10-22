@@ -7,6 +7,10 @@ import { addOtherPayable, createSale } from "@/server/sales";
 import { createBankAccount, getTransaction, importBankCsv, matchCandidates, matchPayable, receiveFromTxn, syncBankAccount, unmatch } from "@/server/bank";
 import { importCleanupInvoices } from "@/server/cleanup";
 import { addSignedFile, approveTemplate, createContract, createTemplateVersion, getContract, listContracts, setContractStatus, updateContract } from "@/server/contracts";
+import { closePeriod, openPeriod } from "@/server/shifts";
+import { retryEmail, saveReminderRules } from "@/server/mailer";
+import { csvCell } from "@/server/csv";
+import { emailOutbox } from "@/db/schema";
 import { makeDivision, makeUser, resetDb } from "./helpers/db";
 
 let owner: Actor, acct: Actor, mgr: Actor, mgr2: Actor, otherMgr: Actor, drv: Actor;
@@ -166,5 +170,43 @@ describe("Clean Up 請求書CSVの取込（読み取りのみ・外部IDで重�
     await db.execute(sql`delete from month_close`);
     // 列が違うCSVは拒否
     await expect(importCleanupInvoices(db, otherMgr, { divisionId: dCln, fileName: "w.csv", text: "請求書番号,取引先,発行日,作業日,品目\r\n", createCustomers: false })).rejects.toThrow(/品目別/);
+  });
+});
+
+describe("セキュリティレビューの指摘への対応", () => {
+  it("責任者は全社・他事業部の稼働希望受付を開閉できない", async () => {
+    const db = getDb();
+    const drvMgr = await makeUser("委託責任者", "MANAGER", { divisionIds: [dDrv] });
+    await openPeriod(db, owner, { month: "2027-01", deadline: "2026-12-25T18:00" });
+    await expect(closePeriod(db, drvMgr, "2027-01")).rejects.toThrow(/見つかりません/);
+    await expect(openPeriod(db, drvMgr, { month: "2027-01", deadline: "2026-12-26T18:00", divisionId: dDrv })).rejects.toThrow(/担当外/);
+    await openPeriod(db, drvMgr, { month: "2027-02", deadline: "2027-01-25T18:00", divisionId: dDrv });
+    await expect(closePeriod(db, mgr, "2027-02")).rejects.toThrow(/見つかりません/);
+    await closePeriod(db, drvMgr, "2027-02");
+  });
+
+  it("リマインド設定は経営者のみ、失敗メールの再送は担当事業部のみ", async () => {
+    const db = getDb();
+    await expect(saveReminderRules(db, mgr, [{ offsetDays: -1, hour: 9, enabled: true }])).rejects.toThrow(/経営者/);
+    const [m] = await db.insert(emailOutbox).values({ dedupeKey: "t:1", kind: "AVAILABILITY_REMINDER", toUserId: drv.userId, toEmail: "x@example.test", subject: "s", body: "b", status: "FAILED" }).returning();
+    await expect(retryEmail(db, mgr, m.id)).rejects.toThrow(/見つかりません/);
+    await retryEmail(db, owner, m.id);
+  });
+
+  it("Clean Up取込で他事業部の売上を取消せない", async () => {
+    const db = getDb();
+    const cln2 = await makeDivision("CLN2", "清掃第二", "CLEANING");
+    const m2 = await makeUser("第二責任者", "MANAGER", { divisionIds: [cln2] });
+    const H = "請求書番号,取引先コード,取引先,発行日,期間開始,期間終了,支払期限,小計,消費税,合計,入金済,状態";
+    const r = await importCleanupInvoices(db, m2, { divisionId: cln2, fileName: "v.csv", text: `${H}\r\nINV-202609-001,C001,x,2026-09-30,2026-09-01,2026-09-30,2026-10-31,1000,100,1100,0,void`, createCustomers: false });
+    expect(r.errors[0]).toMatch(/別の事業部/);
+    const [s] = await db.select().from(sale).where(eq(sale.externalId, "INV-202609-001"));
+    expect(s.canceledAt).toBeNull();
+  });
+
+  it("CSVは全角記号・先頭空白の数式も無効化", () => {
+    expect(csvCell("＝SUM(A1)").startsWith("'")).toBe(true);
+    expect(csvCell("  =1+1").startsWith("'")).toBe(true);
+    expect(csvCell("通常の文字")).toBe("通常の文字");
   });
 });

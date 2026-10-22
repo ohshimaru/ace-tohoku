@@ -9,7 +9,7 @@ import { and, asc, desc, eq, inArray, isNotNull, lte, sql } from "drizzle-orm";
 import type { DB, Tx } from "@/db";
 import { appUser, availabilityPeriod, availabilitySubmission, driver, emailOutbox, reminderRule } from "@/db/schema";
 import { emailDriver, PermanentEmailError, sendMail } from "@/adapters/email";
-import { type Actor, divisionScope, isStaff } from "@/lib/access";
+import { type Actor, can, divisionScope, isStaff } from "@/lib/access";
 import { addDays, formatDateTime, toJstDate } from "@/lib/dates";
 import { conflict, forbidden, notFound } from "@/lib/errors";
 import { writeAudit } from "./audit";
@@ -154,6 +154,11 @@ export async function retryEmail(db: DB, actor: Actor, id: string) {
   await db.transaction(async (tx) => {
     const [m] = await tx.select().from(emailOutbox).where(eq(emailOutbox.id, id)).for("update");
     if (!m) throw notFound("メールが見つかりません");
+    const scope = divisionScope(actor);
+    if (scope) {
+      const [d] = m.toUserId ? await tx.select({ divisionId: driver.divisionId }).from(driver).where(eq(driver.userId, m.toUserId)).limit(1) : [];
+      if (!d || !scope.includes(d.divisionId)) throw notFound("メールが見つかりません");
+    }
     if (m.status !== "FAILED") throw conflict("失敗したメールだけ再試行できます");
     await tx.update(emailOutbox).set({ status: "QUEUED", attempts: 0, nextAttemptAt: new Date(), lastError: null }).where(eq(emailOutbox.id, id));
     await writeAudit(tx, actor, { action: "email.retry", entityType: "email_outbox", entityId: id, summary: `メール「${m.subject}」を再試行` });
@@ -165,7 +170,7 @@ export async function listReminderRules(db: DB) {
 }
 
 export async function saveReminderRules(db: DB, actor: Actor, rows: { id?: string; offsetDays: number; hour: number; enabled: boolean }[]) {
-  if (actor.role !== "OWNER" && actor.role !== "MANAGER") throw forbidden();
+  if (!can.administer(actor)) throw forbidden("リマインドのタイミングは経営者・会社管理者のみ変更できます");
   await db.transaction(async (tx) => {
     await tx.delete(reminderRule).where(eq(reminderRule.kind, "AVAILABILITY"));
     const clean = rows.filter((r) => Number.isInteger(r.offsetDays) && r.offsetDays >= -14 && r.offsetDays <= 7 && r.hour >= 0 && r.hour <= 23);

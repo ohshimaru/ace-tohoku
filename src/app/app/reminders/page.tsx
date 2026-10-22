@@ -21,7 +21,7 @@ export default async function RemindersPage({ searchParams }: { searchParams: Pr
     const db = getDb();
     const [rules, rows] = await Promise.all([listReminderRules(db), listOutbox(db, actor, { status: sp.status })]);
     const email = (await connectionStatus(db)).find((c) => c.key === "email")!;
-    const editable = actor.role === "OWNER" || actor.role === "MANAGER";
+    const editable = actor.role === "OWNER";
     const slots = [...rules, ...Array.from({ length: Math.max(0, 6 - rules.length) }, () => null)];
     return (
       <>

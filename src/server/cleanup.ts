@@ -69,6 +69,7 @@ export async function importCleanupInvoices(db: DB, actor: Actor, opts: { divisi
       const cust = new Map(customers.map((c) => [c.name.trim(), c.id]));
       for (const it of items) {
         const prev = byNo.get(it.no);
+        if (prev && prev.divisionId !== opts.divisionId) throw new Error(`${it.line}行目（${it.no}）: 別の事業部の売上として取込済みです`);
         if (it.status === "void") {
           if (prev && !prev.canceledAt) {
             await assertMonthOpen(tx, prev.month, "売上");

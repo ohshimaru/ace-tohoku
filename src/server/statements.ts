@@ -97,6 +97,10 @@ export async function addAdjustment(db: DB, actor: Actor, raw: { driverId: strin
   return db.transaction(async (tx) => {
     const [d] = await tx.select().from(driver).where(eq(driver.userId, raw.driverId)).limit(1);
     if (!d || !canAccessDivision(actor, d.divisionId)) throw notFound("ドライバーが見つかりません");
+    if (raw.projectId) {
+      const [p] = await tx.select({ divisionId: project.divisionId }).from(project).where(eq(project.id, raw.projectId)).limit(1);
+      if (!p || p.divisionId !== d.divisionId) throw invalid("案件はドライバーの所属事業部の案件を選んでください");
+    }
     const [a] = await tx.insert(statementAdjustment).values({ driverId: raw.driverId, projectId: raw.projectId || null, divisionId: d.divisionId, month, amount, reason, createdById: actor.userId }).returning({ id: statementAdjustment.id });
     await writeAudit(tx, actor, { action: "adjustment.create", entityType: "statement_adjustment", entityId: a.id, divisionId: d.divisionId, summary: `${month} の調整 ${amount}円を登録（承認待ち）: ${reason}` });
     return a.id;
