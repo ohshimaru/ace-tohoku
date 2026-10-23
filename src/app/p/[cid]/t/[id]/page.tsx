@@ -59,7 +59,7 @@ export default async function ProviderTxnPage({ params }: { params: Promise<{ ci
                   {opts.staff.length + opts.divisions.length === 0 && <p className="text-xs text-muted">公開対象にできるスタッフ・事業部がありません</p>}
                 </div>
               </fieldset>
-              <p className="text-xs text-muted">本社公開とスタッフ公開は別々の設定です（一方を公開しても、もう一方には公開されません）。公開停止にすると、以後は本社・スタッフの画面・CSV出力から取得できなくなります。</p>
+              <p className="text-xs text-muted">スタッフには、「公開権限」で明細の閲覧を許可した人だけに表示されます（事業部あての公開も同じ）。本社公開とスタッフ公開は別々の設定です（一方を公開しても、もう一方には公開されません）。公開停止にすると、以後は本社・スタッフの画面・CSV出力から取得できなくなります。</p>
             </ActionForm>
           </Card>
         </Grid>

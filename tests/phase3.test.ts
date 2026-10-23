@@ -99,6 +99,7 @@ describe("銀行: 取込・同期は重複しない", () => {
     expect(a.id).toBe(b.id);
     const rs = await db.select().from(receipt).where(eq(receipt.saleId, saleId));
     expect(rs).toHaveLength(1);
+    expect(rs[0].note).not.toContain("ミライシヨウジ"); // 入金記録（本社・責任者にも見える）に取引の内容を書かない
     const x = await getTransaction(db, prov, t.id);
     expect(x.matches.filter((m) => !m.unmatched_at)).toHaveLength(1);
     expect(x.remaining).toBe(0);

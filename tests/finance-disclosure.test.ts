@@ -62,7 +62,7 @@ describe("3. 新規取込は下書き（提供者だけが見える）", () => {
     const all = await db.select().from(bankTransaction).where(eq(bankTransaction.accountId, acc));
     expect(all.every((t) => t.publishStatus === "DRAFT" && !t.hqVisible && !t.staffVisible)).toBe(true);
     expect(await listVisibleTxns(db, await hq())).toHaveLength(0);
-    expect(await listVisibleTxns(db, await st(d1))).toHaveLength(0);
+    expect(await listVisibleTxns(db, await st(d1)).catch(() => [])).toHaveLength(0);
     expect(await providerListTxns(db, prov, SELF_COMPANY_ID)).toHaveLength(5);
   });
   it("手動登録も下書き", async () => {
@@ -79,7 +79,16 @@ describe("1・2・4. 表示範囲は3者で分かれ、本社公開とスタッ�
     const db = getDb();
     await setVisibility(db, prov, SELF_COMPANY_ID, { ids: [ids["売上入金 ミライ"], ids["清掃資材"], ids["重複取込"]] }, { status: "PUBLISHED", hq: true });
     expect((await listVisibleTxns(db, await hq())).map((t) => t.description).sort()).toEqual(["売上入金 ミライ", "清掃資材", "重複取込"].sort());
-    expect(await listVisibleTxns(db, await st(d1))).toHaveLength(0);
+    expect(await listVisibleTxns(db, await st(d1)).catch(() => [])).toHaveLength(0);
+  });
+  it("スタッフは提供者が明細の閲覧を許可するまで、事業部あてに公開されても見えない（招待した本社・責任者が閲覧範囲を広げられない）", async () => {
+    const db = getDb();
+    await setVisibility(db, prov, SELF_COMPANY_ID, { ids: [ids["燃料代 精算"]] }, { status: "PUBLISHED", staff: true, audience: { users: [], divisions: [dDrv] } });
+    expect(await listVisibleTxns(db, await st(d1)).catch(() => [])).toHaveLength(0);
+    await expect(listVisibleTxns(db, await st(d1))).rejects.toThrow(/公開されていません/);
+    expect((await summarize(db, await st(d1))).published).toBeNull();
+    for (const d of [d1, d2, d3]) await savePolicy(db, prov, SELF_COMPANY_ID, `STAFF:${d.userId}`, { viewDetails: true, viewPublishedTotals: false, viewAllTotals: false, viewRealBalance: false, canExport: false });
+    expect((await listVisibleTxns(db, await st(d2))).map((t) => t.description)).toEqual(["燃料代 精算"]);
   });
   it("スタッフ公開は指定スタッフ・事業部だけ。本社には見えない", async () => {
     const db = getDb();
@@ -149,6 +158,10 @@ describe("5. 非公開の取引は検索・集計・出力・通知に出ない"
     const cards = await db.select().from(actionCard);
     expect(JSON.stringify(cards)).not.toContain("役員報酬");
     expect(cards.some((c) => c.ruleKey.startsWith("cash.") || c.ruleKey.startsWith("bank."))).toBe(false); // 実残高の許可がないため資金カードも作らない
+    // 以前に作られた資金カード（残高入り）も、許可がなければ一覧・件数・要約に出さない
+    await db.insert(actionCard).values({ ruleKey: "cash.capacity", targetKey: "old", priority: 1, title: "資金余力が低下（旧）", finding: "残高 1,234,567円", evidence: [], periodLabel: "x", recommendation: "x", assigneeRole: "ACCOUNTING", status: "DONE", link: "/app" } as never);
+    const { listActionCards } = await import("@/server/actions-engine");
+    expect((await listActionCards(db, owner, { status: "all" })).some((c) => c.c.ruleKey.startsWith("cash."))).toBe(false);
     const slack = JSON.stringify(digestToSlack(await buildDigest(db), false));
     expect(slack).not.toContain("役員報酬");
     const logs = await listAuditLogs(db, owner, {});

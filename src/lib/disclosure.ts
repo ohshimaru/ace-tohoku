@@ -27,7 +27,8 @@ export const POLICY_LABELS: Record<keyof Policy, { label: string; hint: string; 
 /** 行がないときの初期値。本社・スタッフとも、公開された取引だけを対象にする */
 export const DEFAULT_POLICY: Record<"HQ" | "STAFF", Policy> = {
   HQ: { viewDetails: true, viewRealBalance: false, viewAllTotals: false, viewPublishedTotals: true, canExport: false },
-  STAFF: { viewDetails: true, viewRealBalance: false, viewAllTotals: false, viewPublishedTotals: false, canExport: false },
+  // スタッフは初期状態で何も見えない。提供者がスタッフごとに「明細の閲覧」を許可した人だけ（事業部あての公開も同じ）
+  STAFF: { viewDetails: false, viewRealBalance: false, viewAllTotals: false, viewPublishedTotals: false, canExport: false },
 };
 
 export const PROVIDER_POLICY: Policy = { viewDetails: true, viewRealBalance: true, viewAllTotals: true, viewPublishedTotals: true, canExport: true };

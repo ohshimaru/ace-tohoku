@@ -13,6 +13,7 @@ import { type Actor, ROLE_LABELS, type Role } from "@/lib/access";
 import { addDays, currentMonthJst, formatDate, todayJst } from "@/lib/dates";
 import { appUrl } from "@/lib/env";
 import { formatYen } from "@/lib/money";
+import { policyOf } from "./finance-visibility";
 import { getPL, getWorkQueue } from "./metrics";
 
 const SYSTEM: Actor = { userId: "00000000-0000-0000-0000-000000000000", name: "システム", email: null, role: "OWNER", divisionIds: [], companyId: SELF_COMPANY_ID, demo: false };
@@ -48,14 +49,17 @@ export async function buildDigest(db: DB, now = new Date()) {
   const since = new Date(now.getTime() - 24 * 3600_000);
   const divs = new Map((await db.select({ id: division.id, name: division.name }).from(division)).map((d) => [d.id, d.name]));
   const base = { title: actionCard.title, priority: actionCard.priority, divisionId: actionCard.divisionId, link: actionCard.link, dueDate: actionCard.dueDate, status: actionCard.status, assigneeRole: actionCard.assigneeRole, assigneeName: appUser.name, recommendation: actionCard.recommendation };
+  // 資金のカード（実際の銀行残高を含む）は、本社に残高の閲覧が許可されているときだけ
+  const cashOk = (await policyOf(db, { kind: "HQ", companyId: SELF_COMPANY_ID })).viewRealBalance;
+  const noCash = cashOk ? undefined : sql`${actionCard.ruleKey} not like 'cash.%'`;
   const open = await db
     .select(base)
     .from(actionCard)
     .leftJoin(appUser, eq(appUser.id, actionCard.assigneeId))
-    .where(and(inArray(actionCard.status, ["OPEN", "IN_PROGRESS"]), isNull(actionCard.resolvedAt)))
+    .where(and(inArray(actionCard.status, ["OPEN", "IN_PROGRESS"]), isNull(actionCard.resolvedAt), noCash))
     .orderBy(actionCard.dueDate, actionCard.priority);
-  const created = await db.select(base).from(actionCard).leftJoin(appUser, eq(appUser.id, actionCard.assigneeId)).where(gte(actionCard.firstSeenAt, since));
-  const resolved = await db.select(base).from(actionCard).leftJoin(appUser, eq(appUser.id, actionCard.assigneeId)).where(gte(actionCard.resolvedAt, since));
+  const created = await db.select(base).from(actionCard).leftJoin(appUser, eq(appUser.id, actionCard.assigneeId)).where(and(gte(actionCard.firstSeenAt, since), noCash));
+  const resolved = await db.select(base).from(actionCard).leftJoin(appUser, eq(appUser.id, actionCard.assigneeId)).where(and(gte(actionCard.resolvedAt, since), noCash));
   const doneLogs = await db.select({ summary: auditLog.summary, actorName: auditLog.actorName }).from(auditLog).where(and(eq(auditLog.action, "action_card.status"), gte(auditLog.at, since), sql`(${auditLog.summary} like '%DONE%' or ${auditLog.summary} like '%DISMISSED%')`));
   const counts = await db.select({ action: auditLog.action, n: sql<number>`count(*)::int` }).from(auditLog).where(gte(auditLog.at, since)).groupBy(auditLog.action);
   const byAction = new Map(counts.map((c) => [c.action, c.n]));

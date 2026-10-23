@@ -107,7 +107,7 @@ export function ProviderTxnTable({ cid, rows, filterJson, staff, divisions }: { 
           </tbody>
         </table>
       </div>
-      <p className="text-xs text-muted">「公開状態」が「公開中」で、かつ「本社公開」または「スタッフ公開（公開対象あり）」のときだけ、その相手に表示されます。本社に公開してもスタッフには公開されません（別々の設定です）。</p>
+      <p className="text-xs text-muted">「公開状態」が「公開中」で、かつ「本社公開」または「スタッフ公開（公開対象あり）」のときだけ、その相手に表示されます。本社に公開してもスタッフには公開されません（別々の設定です）。スタッフには「公開権限」で明細の閲覧を許可した人だけに表示されます。</p>
 
       <section className="rounded-lg border border-navy-200 bg-navy-50/50 p-4">
         <h2 className="mb-3 text-sm font-bold text-navy-900">表示先をまとめて変更</h2>

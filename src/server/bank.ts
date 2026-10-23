@@ -196,6 +196,11 @@ export async function importBankCsv(db: DB, actor: Actor, accountId: string, fil
 
 const ACTIVE_MATCH = sql`m.unmatched_at is null`;
 
+async function effDateOf(db: DB | Tx, id: string) {
+  const [r] = (await db.execute<{ d: string }>(sql`select eff_date::text d from bank_txn_effective where id = ${id}`)).rows;
+  return r.d;
+}
+
 /** 表示・照合に使う金額（訂正があれば最新の訂正後の金額） */
 async function effAmount(db: DB | Tx, id: string) {
   const [r] = (await db.execute<{ amount: number }>(sql`select eff_amount amount from bank_txn_effective where id = ${id}`)).rows;
@@ -270,6 +275,7 @@ export async function matchReceipt(db: DB, actor: Actor, txnId: string, receiptI
     await tx.update(receipt).set({ bankTransactionId: txnId }).where(eq(receipt.id, receiptId));
     if (t.classification === "UNCLASSIFIED") await tx.update(bankTransaction).set({ classification: "SALES_RECEIPT" }).where(eq(bankTransaction.id, txnId));
     await writeAudit(tx, actor, { action: "bank.match", entityType: "bank_transaction", entityId: txnId, summary: `入金取引（${t.txnDate} ${t.amount}円）を入金記録に照合` });
+    await writeAudit(tx, actor, { action: "receipt.bank_match", entityType: "sale", entityId: r.saleId, summary: `入金 ${r.amount}円（${r.receivedOn}）をサービス提供者が銀行照合` });
   }).catch(rethrowMatchConflict);
 }
 
@@ -281,7 +287,9 @@ export async function receiveFromTxn(db: DB, actor: Actor, txnId: string, saleId
   if (!t || x.effAmount <= 0) throw invalid("入金の取引ではありません");
   const apply = amount ?? x.remaining;
   if (apply <= 0 || apply > x.remaining) throw invalid("照合する金額が正しくありません");
-  const r = await addReceipt(db, actor, { saleId, receivedOn: t.txnDate, amount: String(apply), note: `銀行取引から登録（${t.description.slice(0, 40)}）`, idempotencyKey: `bank:${txnId}:${saleId}` }, { bankTransactionId: txnId, viaProviderMatch: true });
+  // 入金記録は本社・責任者にも見えるため、取引の内容（原本）は書かない。日付は訂正後の値
+  const effDate = await effDateOf(db, txnId);
+  const r = await addReceipt(db, actor, { saleId, receivedOn: effDate, amount: String(apply), note: "サービス提供者が銀行照合により登録", idempotencyKey: `bank:${txnId}:${saleId}` }, { bankTransactionId: txnId, viaProviderMatch: true });
   const [already] = await db.select({ id: bankMatch.id }).from(bankMatch).where(and(eq(bankMatch.targetType, "RECEIPT"), eq(bankMatch.targetId, r.id), isNull(bankMatch.unmatchedAt))).limit(1);
   if (!already) {
     try {
@@ -305,7 +313,10 @@ export async function matchPayable(db: DB, actor: Actor, txnId: string, payableI
     if (p.bankTransactionId) throw conflict("この支払予定は既に別の取引と照合されています");
     if (p.amount > remaining) throw invalid("取引の未照合額を超えています");
     await tx.insert(bankMatch).values({ transactionId: txnId, targetType: "PAYABLE", targetId: payableId, amount: p.amount, matchedById: actor.userId });
-    await tx.update(payable).set({ status: "PAID", paidOn: p.paidOn ?? t.txnDate, bankTransactionId: txnId }).where(eq(payable.id, payableId));
+    const paidOn = p.paidOn ?? (await effDateOf(tx, txnId));
+    await tx.update(payable).set({ status: "PAID", paidOn, bankTransactionId: txnId }).where(eq(payable.id, payableId));
+    // 本社の監査ログ用（取引の内容は書かない）
+    await writeAudit(tx, actor, { action: "payable.paid", entityType: "payable", entityId: payableId, divisionId: p.divisionId, summary: `支払済み（サービス提供者が銀行照合）: ${p.payeeName} ${p.amount}円（${paidOn}）` });
     if (t.classification === "UNCLASSIFIED") await tx.update(bankTransaction).set({ classification: p.source === "STATEMENT" ? "STATEMENT_PAYMENT" : "EXPENSE_PAYMENT" }).where(eq(bankTransaction.id, txnId));
     await writeAudit(tx, actor, { action: "bank.match", entityType: "bank_transaction", entityId: txnId, summary: `出金取引（${t.txnDate} ${t.amount}円）を支払予定「${p.payeeName}」に照合（支払済み）` });
   }).catch(rethrowMatchConflict);
@@ -329,12 +340,14 @@ export async function unmatch(db: DB, actor: Actor, matchId: string, reason: str
     const [m] = await tx.select().from(bankMatch).where(eq(bankMatch.id, matchId)).for("update");
     if (!m || m.unmatchedAt) throw notFound("照合が見つかりません");
     if (m.targetType === "PAYABLE") {
-      await tx.update(payable).set({ status: "SCHEDULED", paidOn: null, bankTransactionId: null }).where(and(eq(payable.id, m.targetId), eq(payable.bankTransactionId, m.transactionId)));
+      const [p] = await tx.update(payable).set({ status: "SCHEDULED", paidOn: null, bankTransactionId: null }).where(and(eq(payable.id, m.targetId), eq(payable.bankTransactionId, m.transactionId))).returning();
+      if (p) await writeAudit(tx, actor, { action: "payable.reopen", entityType: "payable", entityId: p.id, divisionId: p.divisionId, summary: `未払いに戻した（サービス提供者が銀行照合を解除）: ${p.payeeName} ${p.amount}円` });
     } else {
       const [r] = await tx.select().from(receipt).where(eq(receipt.id, m.targetId)).for("update");
       if (r && r.idempotencyKey.startsWith("bank:") && !r.canceledAt) {
         await assertMonthOpen(tx, r.receivedOn.slice(0, 7), "入金");
         await tx.update(receipt).set({ canceledAt: new Date(), cancelReason: `銀行照合の解除: ${why}`, bankTransactionId: null }).where(eq(receipt.id, r.id));
+        await writeAudit(tx, actor, { action: "receipt.cancel", entityType: "sale", entityId: r.saleId, summary: `入金 ${r.amount}円を取消（サービス提供者が銀行照合を解除）: ${why}` });
       } else if (r) await tx.update(receipt).set({ bankTransactionId: null }).where(eq(receipt.id, r.id));
     }
     await tx.update(bankMatch).set({ unmatchedAt: new Date() }).where(eq(bankMatch.id, matchId));

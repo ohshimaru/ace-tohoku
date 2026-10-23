@@ -12,10 +12,17 @@ import { type Actor, divisionScope, isStaff } from "@/lib/access";
 import { conflict, forbidden, notFound } from "@/lib/errors";
 import { writeAudit } from "./audit";
 
+export async function hqSeesRealBalance(db: DB) {
+  return (await policyOf(db, { kind: "HQ", companyId: SELF_COMPANY_ID })).viewRealBalance;
+}
+
 export async function listActionCards(db: DB, actor: Actor, opts: { status?: "active" | "all" | "done"; divisionId?: string; limit?: number } = {}) {
   if (!isStaff(actor)) throw forbidden();
   const scope = divisionScope(actor);
+  // 資金のカードは実際の銀行残高を含むため、提供者が本社に残高の閲覧を許可している間だけ表示（解消済みも含めて）
+  const cashOk = await hqSeesRealBalance(db);
   const conds = [
+    cashOk ? undefined : sql`${actionCard.ruleKey} not like 'cash.%'`,
     // 責任者には担当事業部と、自分の役割に割り当てられた全社カードのうち事業部に関するものだけ
     scope ? (scope.length ? inArray(actionCard.divisionId, scope) : sql`false`) : undefined,
     opts.divisionId ? eq(actionCard.divisionId, opts.divisionId) : undefined,
@@ -128,7 +135,7 @@ async function evaluateRules(db: DB, today: string): Promise<Finding[]> {
   }
 
   // 2. 資金余力（実際の銀行残高を使うため、提供者が本社に「実際の銀行残高」の閲覧を許可している場合だけ）
-  const hqBalance = (await policyOf(db, { kind: "HQ", companyId: SELF_COMPANY_ID })).viewRealBalance;
+  const hqBalance = await hqSeesRealBalance(db);
   const cash = await db.execute<{ bank: number; accounts: number; pay: number; rec: number }>(sql`
     select coalesce(sum(balance), 0)::float8 bank, count(*)::int accounts,
       (select coalesce(sum(amount), 0) from payable where status = 'SCHEDULED' and due_date <= ${addDays(today, s.cashHorizonDays)})::float8 pay,

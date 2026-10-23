@@ -9,7 +9,7 @@ import "dotenv/config";
 import { randomBytes } from "node:crypto";
 import { eq, sql } from "drizzle-orm";
 import { closeDb, getDb } from "@/db";
-import { appUser, availabilityPeriod, bankAccount, bankTransaction, company, companySetting, division, driver, expenseCategory, providerAssignment, SELF_COMPANY_ID, userDivision } from "@/db/schema";
+import { appUser, availabilityPeriod, bankAccount, bankTransaction, company, companySetting, disclosurePolicy, division, driver, expenseCategory, providerAssignment, SELF_COMPANY_ID, userDivision } from "@/db/schema";
 import type { Actor, Role } from "@/lib/access";
 import { addDays, addMonths, currentMonthJst, monthRange, todayJst } from "@/lib/dates";
 import { refreshActionCards } from "@/server/actions-engine";
@@ -185,7 +185,7 @@ async function main() {
 async function ensureProviderDemo() {
   const db = getDb();
   const [exists] = await db.select({ id: appUser.id }).from(appUser).where(eq(appUser.email, `provider${D}`)).limit(1);
-  if (exists) return false;
+  if (exists) return grantDemoStaff();
   const mk = async (name: string, email: string): Promise<Actor> => {
     const [u] = await db.insert(appUser).values({ name, email: `${email}${D}`, role: "PROVIDER", companyId: null, status: "ACTIVE", emailVerifiedAt: new Date() }).returning();
     return { userId: u.id, name, email: u.email, role: "PROVIDER", divisionIds: [], companyId: null, demo: true };
@@ -214,7 +214,22 @@ async function ensureProviderDemo() {
   const [dv] = await db.select({ id: division.id }).from(division).where(eq(division.code, "DRV")).limit(1);
   if (drv1 && toUser.length) await setVisibility(db, p1, SELF_COMPANY_ID, { ids: toUser }, { status: "PUBLISHED", staff: true, audience: { users: [drv1.id], divisions: [] } });
   if (dv && toDiv.length) await setVisibility(db, p1, SELF_COMPANY_ID, { ids: toDiv }, { status: "PUBLISHED", staff: true, audience: { users: [], divisions: [dv.id] } });
+  await grantDemoStaff();
   return true;
+}
+
+/** スタッフは初期状態で入出金が見えないため、デモでは佐藤・鈴木（委託事業部）に明細の閲覧だけを許可（あれば何もしない） */
+async function grantDemoStaff() {
+  const db = getDb();
+  const users = await db.select({ id: appUser.id }).from(appUser).where(sql`${appUser.email} in (${`driver1${D}`}, ${`driver2${D}`})`);
+  const r = users.length
+    ? await db
+        .insert(disclosurePolicy)
+        .values(users.map((u) => ({ companyId: SELF_COMPANY_ID, subject: `STAFF:${u.id}`, viewDetails: true, viewRealBalance: false, viewAllTotals: false, viewPublishedTotals: false, canExport: false })))
+        .onConflictDoNothing()
+        .returning()
+    : [];
+  return r.length > 0;
 }
 
 main()

@@ -126,7 +126,7 @@ const staffInput = z.object({
 
 export async function listStaff(db: DB, actor: Actor) {
   if (!can.administer(actor)) throw forbidden("利用者の管理は経営者・会社管理者のみ可能です");
-  const users = await db.select().from(appUser).where(inArray(appUser.role, ["OWNER", "ACCOUNTING", "MANAGER"])).orderBy(asc(appUser.role), asc(appUser.name));
+  const users = await db.select().from(appUser).where(and(inArray(appUser.role, ["OWNER", "ACCOUNTING", "MANAGER"]), actor.companyId ? eq(appUser.companyId, actor.companyId) : sql`false`)).orderBy(asc(appUser.role), asc(appUser.name));
   const divs = await db.select().from(userDivision);
   return users.map((u) => ({ ...u, passwordHash: undefined, divisionIds: divs.filter((d) => d.userId === u.id).map((d) => d.divisionId) }));
 }
@@ -138,7 +138,7 @@ export async function createStaff(db: DB, actor: Actor, raw: z.input<typeof staf
   const hash = await hashPassword(raw.password ?? "");
   try {
     return await db.transaction(async (tx) => {
-      const [u] = await tx.insert(appUser).values({ name: input.name, email: input.email, passwordHash: hash, role: input.role, status: "ACTIVE", emailVerifiedAt: new Date(), approvedAt: new Date(), approvedById: actor.userId }).returning({ id: appUser.id });
+      const [u] = await tx.insert(appUser).values({ name: input.name, email: input.email, passwordHash: hash, role: input.role, companyId: actor.companyId, status: "ACTIVE", emailVerifiedAt: new Date(), approvedAt: new Date(), approvedById: actor.userId }).returning({ id: appUser.id });
       if (input.role === "MANAGER") await tx.insert(userDivision).values(input.divisionIds.map((divisionId) => ({ userId: u.id, divisionId })));
       await writeAudit(tx, actor, { action: "user.create", entityType: "app_user", entityId: u.id, summary: `利用者「${input.name}」（${input.role}）を追加` });
       return u.id;

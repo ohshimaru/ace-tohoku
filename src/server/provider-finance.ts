@@ -156,7 +156,7 @@ async function validateAudience(db: DB | Tx, companyId: string, a: { users: stri
   const divisions = [...new Set(a.divisions)];
   if (!users.every(isUuid) || !divisions.every(isUuid)) throw invalid("公開対象の指定が正しくありません");
   if (users.length) {
-    const r = await db.execute<{ n: number }>(sql`select count(*)::int n from app_user where role = 'DRIVER' and company_id = ${companyId} and id in (${sql.join(users.map((u) => sql`${u}::uuid`), sql`, `)})`);
+    const r = await db.execute<{ n: number }>(sql`select count(*)::int n from app_user where role = 'DRIVER' and status <> 'SUSPENDED' and company_id = ${companyId} and id in (${sql.join(users.map((u) => sql`${u}::uuid`), sql`, `)})`);
     if (r.rows[0].n !== users.length) throw invalid("公開対象のスタッフが見つかりません（この会社のスタッフだけ選べます）");
   }
   if (divisions.length) {

@@ -8,13 +8,13 @@
  */
 import { asc, inArray, isNull, sql } from "drizzle-orm";
 import type { DB, Tx } from "@/db";
-import { allocationRule, allocationShare, division } from "@/db/schema";
+import { allocationRule, allocationShare, division, SELF_COMPANY_ID } from "@/db/schema";
 import { type Actor, can, canAccessDivision, divisionScope, isStaff } from "@/lib/access";
 import { addDays, addMonths, currentMonthJst, monthsBetween, toDateValue, todayJst } from "@/lib/dates";
 import { forbidden } from "@/lib/errors";
 import { allocate } from "@/lib/money";
 import { getSettings } from "./masters";
-import { summarize, viewerFor } from "./finance-visibility";
+import { policyOf, summarize, viewerFor } from "./finance-visibility";
 
 export type PeriodFilter = { from: string; to: string; divisionId?: string };
 
@@ -214,6 +214,7 @@ export async function getWorkQueue(db: DB, actor: Actor, month = currentMonthJst
   const scope = divisionScope(actor);
   const divCond = (col: string) => (scope ? (scope.length ? sql`and ${sql.raw(col)} in ${scope}` : sql`and false`) : sql``);
   const today = todayJst();
+  const cashOk = (await policyOf(db, { kind: "HQ", companyId: SELF_COMPANY_ID })).viewRealBalance;
   const [q] = (await db.execute<{
     pending_expenses: number;
     pending_amount: number;
@@ -238,7 +239,7 @@ export async function getWorkQueue(db: DB, actor: Actor, month = currentMonthJst
          and exists (select 1 from driver d where d.user_id = s.driver_id ${divCond("d.division_id")}))::int draft_statements,
       (select count(*) from budget_request b where b.status = 'PENDING' ${divCond("b.division_id")})::int pending_budget_requests,
       (select count(*) from action_card c where c.status in ('OPEN', 'IN_PROGRESS') and c.resolved_at is null
-         ${scope ? sql`and c.rule_key not like 'cash.%'` : sql``} ${divCond("c.division_id")})::int open_tasks`)).rows;
+         ${scope || !cashOk ? sql`and c.rule_key not like 'cash.%'` : sql``} ${divCond("c.division_id")})::int open_tasks`)).rows;
   const periods = await db.execute<{ month: string; deadline: Date; unsubmitted: number }>(sql`
     select p.month, p.deadline,
       (select count(*) from driver d join app_user u on u.id = d.user_id
