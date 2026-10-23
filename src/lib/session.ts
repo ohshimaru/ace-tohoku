@@ -3,7 +3,7 @@ import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { cache } from "react";
 import { getDb } from "@/db";
-import { type Actor, isStaff } from "@/lib/access";
+import { type Actor, isProvider, isStaff } from "@/lib/access";
 import { AppError } from "@/lib/errors";
 import { actorFromToken, SESSION_COOKIE, SESSION_DAYS } from "@/server/auth";
 
@@ -27,25 +27,56 @@ export async function clearSessionCookie() {
   (await cookies()).delete(SESSION_COOKIE);
 }
 
-/** 会社側ページ用 */
+/** ログイン後の最初の画面 */
+export function homeFor(a: Pick<Actor, "role">) {
+  return a.role === "DRIVER" ? "/d" : a.role === "PROVIDER" ? "/p" : "/app";
+}
+
+/** 会社側（本社）ページ用 */
 export async function requireStaff(): Promise<Actor> {
   const a = await getActor();
   if (!a) redirect("/login");
-  if (!isStaff(a)) redirect("/d");
+  if (!isStaff(a)) redirect(homeFor(a));
   return a;
 }
 
-/** ドライバー側ページ用 */
+/** ドライバー（スタッフ）側ページ用 */
 export async function requireDriver(): Promise<Actor> {
   const a = await getActor();
   if (!a) redirect("/d/login");
-  if (a.role !== "DRIVER") redirect("/app");
+  if (a.role !== "DRIVER") redirect(homeFor(a));
   return a;
 }
 
-/** Server Action / Route Handler 用 */
+/** サービス提供者ページ用 */
+export async function requireProvider(): Promise<Actor> {
+  const a = await getActor();
+  if (!a) redirect("/login");
+  if (!isProvider(a)) redirect(homeFor(a));
+  return a;
+}
+
+/**
+ * 本社・スタッフの Server Action / Route Handler 用。
+ * サービス提供者はここを通れない（提供者の操作は requireProviderForAction を使う専用の処理だけ）
+ */
 export async function requireActorForAction(): Promise<Actor> {
   const a = await getActor();
   if (!a) throw new AppError("UNAUTHENTICATED", "ログインが必要です。再度ログインしてください");
+  if (isProvider(a)) throw new AppError("FORBIDDEN", "この操作はサービス提供者画面からは行えません");
+  return a;
+}
+
+/** 本社・スタッフの Route Handler 用（提供者・未ログインは null） */
+export async function getCompanyActor(): Promise<Actor | null> {
+  const a = await getActor();
+  return a && !isProvider(a) ? a : null;
+}
+
+/** サービス提供者の Server Action / Route Handler 用 */
+export async function requireProviderForAction(): Promise<Actor> {
+  const a = await getActor();
+  if (!a) throw new AppError("UNAUTHENTICATED", "ログインが必要です。再度ログインしてください");
+  if (!isProvider(a)) throw new AppError("FORBIDDEN", "サービス提供者のみ操作できます");
   return a;
 }

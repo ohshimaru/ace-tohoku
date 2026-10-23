@@ -14,6 +14,7 @@ import { addDays, addMonths, currentMonthJst, monthsBetween, toDateValue, todayJ
 import { forbidden } from "@/lib/errors";
 import { allocate } from "@/lib/money";
 import { getSettings } from "./masters";
+import { summarize, viewerFor } from "./finance-visibility";
 
 export type PeriodFilter = { from: string; to: string; divisionId?: string };
 
@@ -151,16 +152,19 @@ export async function getTrend(db: DB, actor: Actor, endMonth: string, months = 
   return out;
 }
 
-/** 資金・入出金予定（全社権限のみ） */
+/**
+ * 資金・入出金予定（経営者・経理）
+ * 銀行の情報はサービス提供者の公開設定に従う（finance-visibility.summarize）。
+ * - 実際の銀行残高・資金余力は「実際の銀行残高」の閲覧が許可されている場合だけ計算する
+ * - それ以外は「公開対象の入出金合計」（公開された取引だけの合計）を表示する
+ */
 export async function getCashPosition(db: DB, actor: Actor) {
-  if (!can.viewBank(actor)) throw forbidden("銀行残高は経営者・経理のみ閲覧できます");
+  if (!can.viewBank(actor)) throw forbidden("資金は経営者・経理のみ閲覧できます");
   const s = await getSettings(db);
   const today = todayJst();
   const horizon = addDays(today, s.cashHorizonDays);
-  const accounts = await db.execute<{ id: string; bank_name: string; branch_name: string; account_type: string; last4: string; balance: number | null; last_synced_at: Date | null; sync_status: string; is_demo: boolean; provider: string }>(sql`
-    select id, bank_name, branch_name, account_type, account_number_last4 last4, balance::float8 balance, last_synced_at, sync_status, is_demo, provider
-    from bank_account where archived_at is null order by bank_name`);
-  const bankTotal = accounts.rows.reduce((t, a) => t + (a.balance ?? 0), 0);
+  const viewer = await viewerFor(db, actor);
+  const fin = await summarize(db, viewer, {});
   const [rec] = (await db.execute<{ due: number; overdue: number; total: number }>(sql`
     with o as (
       select s.expected_receipt_date d, s.amount_ex_tax + s.tax_amount - coalesce((select sum(r.amount) from receipt r where r.sale_id = s.id and r.canceled_at is null), 0) rest
@@ -174,13 +178,13 @@ export async function getCashPosition(db: DB, actor: Actor) {
            coalesce(sum(amount) filter (where due_date < ${today}), 0)::float8 overdue,
            coalesce(sum(amount), 0)::float8 total
     from payable where status = 'SCHEDULED'`)).rows;
-  const lastSync = accounts.rows.map((a) => toDateValue(a.last_synced_at)).reduce<Date | null>((m, d) => (d && (!m || d > m) ? d : m), null);
   return {
-    accounts: accounts.rows,
-    bankTotal,
-    hasBank: accounts.rows.length > 0,
-    anyDemo: accounts.rows.some((a) => a.is_demo),
-    lastSync,
+    policy: fin.policy,
+    published: fin.published,
+    all: fin.all,
+    balances: fin.balances,
+    bankTotal: fin.balanceTotal,
+    anyDemo: !!fin.balances?.some((b) => b.isDemo),
     horizonDays: s.cashHorizonDays,
     receivablesDue: rec.due,
     receivablesOverdue: rec.overdue,
@@ -188,8 +192,8 @@ export async function getCashPosition(db: DB, actor: Actor) {
     payablesDue: pay.due,
     payablesOverdue: pay.overdue,
     payablesTotal: pay.total,
-    /** 資金余力 = 銀行残高 − 期間内の支払予定 ＋ 期間内の入金予定（予算とは別の指標） */
-    cashCapacity: bankTotal - pay.due + rec.due,
+    /** 資金余力 = 銀行残高 − 期間内の支払予定 ＋ 期間内の入金予定（実際の残高が許可されている場合だけ） */
+    cashCapacity: fin.balanceTotal === null ? null : fin.balanceTotal - pay.due + rec.due,
     warningThreshold: s.cashWarningThreshold,
   };
 }

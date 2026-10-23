@@ -189,8 +189,10 @@ const receiptInput = z.object({
   idempotencyKey: z.string().min(8).max(100),
 });
 
-export async function addReceipt(db: DB, actor: Actor, raw: z.input<typeof receiptInput>, opts: { bankTransactionId?: string } = {}) {
-  if (!isCompanyWide(actor)) throw forbidden("入金の登録は経営者・経理のみ可能です");
+export async function addReceipt(db: DB, actor: Actor, raw: z.input<typeof receiptInput>, opts: { bankTransactionId?: string; viaProviderMatch?: boolean } = {}) {
+  // 提供者は、担当会社（自社）の銀行取引からの照合（bank.receiveFromTxn で確認済み）に限り入金を登録できる
+  const providerOk = actor.role === "PROVIDER" && opts.viaProviderMatch && !!opts.bankTransactionId;
+  if (!isCompanyWide(actor) && !providerOk) throw forbidden("入金の登録は経営者・経理のみ可能です");
   const input = parse(receiptInput, raw);
   if (input.receivedOn > todayJst()) throw invalid("未来の日付の入金は登録できません");
   try {

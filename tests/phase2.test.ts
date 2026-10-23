@@ -1,7 +1,7 @@
 import { eq, sql } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { closeDb, getDb } from "@/db";
-import { appUser, assignment, driver, emailOutbox, expense, payable, statement } from "@/db/schema";
+import { appUser, assignment, SELF_COMPANY_ID, driver, emailOutbox, expense, payable, statement } from "@/db/schema";
 import type { Actor } from "@/lib/access";
 import { getPL } from "@/server/metrics";
 import { approveExpense, createExpense, submitExpense } from "@/server/expenses";
@@ -34,7 +34,7 @@ async function activeDriver(name: string, opts: { quals?: string; vehicles?: str
   await updateDriverProfile(db, mgr, inv.id, { qualifications: opts.quals ?? "", vehicles: opts.vehicles ?? "", areas: "", taxMode: "EXCLUSIVE", withholdingEnabled: false, maxDaysPerMonth: opts.maxDays });
   await db.update(appUser).set({ emailVerifiedAt: new Date() }).where(eq(appUser.id, inv.id));
   await db.update(appUser).set({ email: mail }).where(eq(appUser.id, inv.id));
-  const a: Actor = { userId: inv.id, name, email: mail, role: "DRIVER", divisionIds: [], demo: false };
+  const a: Actor = { userId: inv.id, name, email: mail, role: "DRIVER", divisionIds: [], companyId: SELF_COMPANY_ID, demo: false };
   return { actor: a, sub };
 }
 

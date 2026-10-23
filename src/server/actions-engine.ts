@@ -6,7 +6,8 @@
  */
 import { and, asc, eq, inArray, isNull, sql } from "drizzle-orm";
 import type { DB } from "@/db";
-import { actionCard, appUser } from "@/db/schema";
+import { actionCard, appUser, SELF_COMPANY_ID } from "@/db/schema";
+import { policyOf } from "./finance-visibility";
 import { type Actor, divisionScope, isStaff } from "@/lib/access";
 import { conflict, forbidden, notFound } from "@/lib/errors";
 import { writeAudit } from "./audit";
@@ -126,15 +127,16 @@ async function evaluateRules(db: DB, today: string): Promise<Finding[]> {
     }
   }
 
-  // 2. 資金余力
+  // 2. 資金余力（実際の銀行残高を使うため、提供者が本社に「実際の銀行残高」の閲覧を許可している場合だけ）
+  const hqBalance = (await policyOf(db, { kind: "HQ", companyId: SELF_COMPANY_ID })).viewRealBalance;
   const cash = await db.execute<{ bank: number; accounts: number; pay: number; rec: number }>(sql`
     select coalesce(sum(balance), 0)::float8 bank, count(*)::int accounts,
       (select coalesce(sum(amount), 0) from payable where status = 'SCHEDULED' and due_date <= ${addDays(today, s.cashHorizonDays)})::float8 pay,
       (select coalesce(sum(o.rest), 0) from (select s.expected_receipt_date d, s.amount_ex_tax + s.tax_amount - coalesce((select sum(r.amount) from receipt r where r.sale_id = s.id and r.canceled_at is null), 0) rest from sale s where s.canceled_at is null) o
          where o.rest > 0 and o.d between ${today} and ${addDays(today, s.cashHorizonDays)})::float8 rec
-    from bank_account where archived_at is null and balance is not null`);
+    from bank_account where company_id = ${SELF_COMPANY_ID} and archived_at is null and balance is not null`);
   const c = cash.rows[0];
-  if (c.accounts > 0) {
+  if (hqBalance && c.accounts > 0) {
     const cap = c.bank - c.pay + c.rec;
     const tight = c.bank - c.pay;
     if (cap < s.cashWarningThreshold || tight < s.cashWarningThreshold) {
@@ -182,7 +184,7 @@ async function evaluateRules(db: DB, today: string): Promise<Finding[]> {
 
   // 4. 予算超過・超過見込み（当月）
   const { listBudgetStatus } = await import("./budget");
-  const sys: Actor = { userId: "00000000-0000-0000-0000-000000000000", name: "システム", email: null, role: "OWNER", divisionIds: [], demo: false };
+  const sys: Actor = { userId: "00000000-0000-0000-0000-000000000000", name: "システム", email: null, role: "OWNER", divisionIds: [], companyId: SELF_COMPANY_ID, demo: false };
   for (const e of await listBudgetStatus(db, sys, month)) {
     const over = e.available < 0;
     const willOver = !over && e.forecast !== null && e.forecast > e.cap && e.cap > 0;
@@ -334,44 +336,7 @@ async function evaluateRules(db: DB, today: string): Promise<Finding[]> {
     });
   }
 
-  // 11. 銀行同期の失敗・未照合の取引
-  const bf = await db.execute<{ id: string; bank_name: string; last_error: string | null }>(sql`select id, bank_name, last_error from bank_account where archived_at is null and sync_status = 'FAILED'`);
-  for (const r of bf.rows) {
-    out.push({
-      ruleKey: "cash.sync_failed",
-      targetKey: r.id,
-      priority: 1,
-      divisionId: null,
-      title: `${r.bank_name}の口座同期に失敗しています`,
-      finding: `最新の残高・取引が取得できていません。${r.last_error ?? ""}`,
-      evidence: [{ label: "口座", value: r.bank_name }],
-      periodLabel: today,
-      recommendation: "銀行連携の設定を確認して再同期するか、CSVを取り込んでください。",
-      assigneeRole: "ACCOUNTING",
-      dueDate: today,
-      link: "/app/bank",
-    });
-  }
-  const um = await db.execute<{ n: number; total: number }>(sql`
-    select count(*)::int n, coalesce(sum(abs(amount)), 0)::float8 total from bank_transaction t
-    where t.txn_date < ${addDays(today, -3)} and t.classification in ('UNCLASSIFIED','SALES_RECEIPT','EXPENSE_PAYMENT','STATEMENT_PAYMENT')
-      and not exists (select 1 from bank_match m where m.transaction_id = t.id and m.unmatched_at is null)`);
-  if (um.rows[0].n > 0) {
-    out.push({
-      ruleKey: "cash.unmatched",
-      targetKey: "company",
-      priority: 3,
-      divisionId: null,
-      title: "照合されていない銀行取引があります",
-      finding: `入金・支払と紐付いていない取引が ${um.rows[0].n}件 あります。`,
-      evidence: [{ label: "件数", value: `${um.rows[0].n}件` }, { label: "金額の合計", value: yen(um.rows[0].total) }],
-      periodLabel: `〜${addDays(today, -3)}`,
-      recommendation: "照合候補を確認して紐付けるか、振替・借入・税金などの区分を設定してください。",
-      assigneeRole: "ACCOUNTING",
-      dueDate: addDays(today, 7),
-      link: "/app/bank?view=unmatched",
-    });
-  }
+  // 11. 銀行同期の失敗・未照合の取引は、サービス提供者の画面（/p）で表示する（本社の対応カードには出さない）
 
   // 12. 源泉徴収の要否が未確認の個人ドライバー（税務は要確認）
   const wh = await db.execute<{ division_id: string; name: string; n: number }>(sql`

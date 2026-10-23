@@ -82,8 +82,22 @@ export const division = pgTable("division", {
   createdAt: createdAt(),
 });
 
-export const roleEnum = pgEnum("role", ["OWNER", "ACCOUNTING", "MANAGER", "DRIVER"]);
+export const roleEnum = pgEnum("role", ["OWNER", "ACCOUNTING", "MANAGER", "DRIVER", "PROVIDER"]);
 export const userStatusEnum = pgEnum("user_status", ["INVITED", "PENDING", "ACTIVE", "SUSPENDED"]);
+
+/**
+ * 会社（財務データの持ち主）。このシステムの本社・スタッフは「自社」（is_self）に属する。
+ * サービス提供者は provider_assignment で割り当てられた会社だけを扱える
+ */
+export const SELF_COMPANY_ID = "00000000-0000-4000-8000-000000000001";
+
+export const company = pgTable("company", {
+  id: id(),
+  name: text("name").notNull(),
+  isSelf: boolean("is_self").notNull().default(false),
+  isDemo: boolean("is_demo").notNull().default(false),
+  createdAt: createdAt(),
+});
 
 export const appUser = pgTable(
   "app_user",
@@ -96,6 +110,8 @@ export const appUser = pgTable(
     lineUserId: text("line_user_id").unique(),
     lineDisplayName: text("line_display_name"),
     role: roleEnum("role").notNull(),
+    /** 所属会社（本社・スタッフ）。サービス提供者は null（担当会社は provider_assignment） */
+    companyId: uuid("company_id").default(SELF_COMPANY_ID).references((): AnyPgColumn => company.id),
     status: userStatusEnum("status").notNull().default("ACTIVE"),
     approvedAt: ts("approved_at"),
     approvedById: uuid("approved_by_id").references((): AnyPgColumn => appUser.id),
@@ -518,8 +534,20 @@ export const monthClose = pgTable("month_close", {
 /* 銀行                                                                 */
 /* ================================================================== */
 
+/** サービス提供者の担当会社（運営側のコマンドでのみ設定。本社・スタッフは変更できない） */
+export const providerAssignment = pgTable(
+  "provider_assignment",
+  {
+    userId: uuid("user_id").notNull().references(() => appUser.id),
+    companyId: uuid("company_id").notNull().references(() => company.id),
+    createdAt: createdAt(),
+  },
+  (t) => [primaryKey({ columns: [t.userId, t.companyId] })],
+);
+
 export const bankAccount = pgTable("bank_account", {
   id: id(),
+  companyId: uuid("company_id").notNull().default(SELF_COMPANY_ID).references(() => company.id),
   bankName: text("bank_name").notNull(),
   branchName: text("branch_name").notNull(),
   accountType: text("account_type").notNull().default("普通"),
@@ -549,6 +577,9 @@ export const bankTxnClassEnum = pgEnum("bank_txn_class", [
   "OTHER",
 ]);
 
+export const txnPublishStatusEnum = pgEnum("txn_publish_status", ["DRAFT", "PUBLISHED", "SUSPENDED"]);
+export const txnConfirmStatusEnum = pgEnum("txn_confirm_status", ["UNCONFIRMED", "CONFIRMED", "NEEDS_REVIEW"]);
+
 export const bankTransaction = pgTable(
   "bank_transaction",
   {
@@ -560,10 +591,73 @@ export const bankTransaction = pgTable(
     balanceAfter: integer("balance_after"),
     externalId: text("external_id").notNull(),
     classification: bankTxnClassEnum("classification").notNull().default("UNCLASSIFIED"),
+    /** 提供者のメモ（本社・スタッフには表示しない） */
     note: text("note"),
     importedAt: ts("imported_at").notNull().defaultNow(),
+    /** 取得元: DEMO / CSV / API名 / MANUAL（手動登録） */
+    source: text("source").notNull().default("CSV"),
+    /** 公開状態（取込直後は下書き＝提供者のみ） */
+    publishStatus: txnPublishStatusEnum("publish_status").notNull().default("DRAFT"),
+    /** 本社に公開する（スタッフ公開とは独立。継承しない） */
+    hqVisible: boolean("hq_visible").notNull().default(false),
+    /** スタッフに公開する（公開対象は bank_txn_audience） */
+    staffVisible: boolean("staff_visible").notNull().default(false),
+    /** 集計対象外（重複・誤取込）。非公開とは別の設定 */
+    excluded: boolean("excluded").notNull().default(false),
+    excludeReason: text("exclude_reason"),
+    confirmStatus: txnConfirmStatusEnum("confirm_status").notNull().default("UNCONFIRMED"),
+    projectId: uuid("project_id").references(() => project.id),
+    updatedById: uuid("updated_by_id").references(() => appUser.id),
+    updatedAt: ts("updated_at"),
   },
   (t) => [uniqueIndex("bank_txn_external_uq").on(t.accountId, t.externalId), index("bank_txn_date_idx").on(t.txnDate)],
+);
+
+/** スタッフへの公開対象（指定スタッフ／事業部） */
+export const bankTxnAudience = pgTable(
+  "bank_txn_audience",
+  {
+    transactionId: uuid("transaction_id").notNull().references(() => bankTransaction.id),
+    kind: text("kind").notNull(), // USER / DIVISION
+    targetId: uuid("target_id").notNull(),
+  },
+  (t) => [primaryKey({ columns: [t.transactionId, t.kind, t.targetId] }), check("bank_txn_audience_kind", sql`${t.kind} in ('USER', 'DIVISION')`)],
+);
+
+/** 原本の訂正（原本は変更せず、訂正を追記する。最新の訂正が表示・集計に使われる） */
+export const bankTxnCorrection = pgTable(
+  "bank_txn_correction",
+  {
+    id: id(),
+    transactionId: uuid("transaction_id").notNull().references(() => bankTransaction.id),
+    txnDate: day("txn_date").notNull(),
+    amount: integer("amount").notNull(),
+    description: text("description").notNull(),
+    reason: text("reason").notNull(),
+    createdById: uuid("created_by_id").references(() => appUser.id),
+    createdAt: createdAt(),
+  },
+  (t) => [index("bank_txn_correction_txn_idx").on(t.transactionId, t.createdAt)],
+);
+
+/**
+ * 公開権限（会社ごと・閲覧者ごと）。subject は 'HQ'（本社）または 'STAFF:<利用者ID>'。
+ * 行がない場合の初期値は lib/disclosure.ts の DEFAULT_POLICY
+ */
+export const disclosurePolicy = pgTable(
+  "disclosure_policy",
+  {
+    companyId: uuid("company_id").notNull().references(() => company.id),
+    subject: text("subject").notNull(),
+    viewDetails: boolean("view_details").notNull(),
+    viewRealBalance: boolean("view_real_balance").notNull(),
+    viewAllTotals: boolean("view_all_totals").notNull(),
+    viewPublishedTotals: boolean("view_published_totals").notNull(),
+    canExport: boolean("can_export").notNull(),
+    updatedById: uuid("updated_by_id").references(() => appUser.id),
+    updatedAt: updatedAt(),
+  },
+  (t) => [primaryKey({ columns: [t.companyId, t.subject] })],
 );
 
 /** 取引と入金・支払予定の照合（1取引に複数可、1入金/支払は1取引まで） */

@@ -8,7 +8,7 @@ export function guideSteps(role: Role, opts: { hasDriverDivision: boolean }): Gu
     actions: { title: "AIの対応指示を見る", body: "未入金・予算超過・日報の未提出など、今やるべきことが根拠の数字つきで並びます。担当と期限を決めて「対応中」「完了」にします。", href: "/app/actions", cta: "対応することを開く" },
     pl: { title: "事業部ごとの儲けを見る", body: "売上・経費・外注費・共通経費の配賦後の利益を事業部別に表示します。数字を押すと明細まで確認できます。", href: "/app/pl", cta: "損益・予実を開く" },
     approvals: { title: "申請を承認する", body: "経費の申請と日報がここに集まります。内容を確認して承認・差戻しします。", href: "/app/approvals", cta: "承認を開く" },
-    bank: { title: "銀行の入出金を照合する", body: "口座の入出金を、売上の入金や支払予定と結び付けます。照合すると支払予定が「支払済み」になります。", href: "/app/bank", cta: "銀行口座を開く" },
+    bank: { title: "公開された入出金を確認する", body: "サービス提供者が本社向けに公開した入出金と「公開対象の入出金合計」を確認します。取込・照合・公開範囲の設定はサービス提供者が行います。", href: "/app/bank", cta: "入出金を開く" },
     statements: { title: "ドライバーの稼働明細を確定する", body: "承認済みの日報から月の明細を作り、確定・公開します。確定すると支払予定が作られます。", href: "/app/statements", cta: "稼働明細を開く" },
     months: { title: "月を締める", body: "確認が終わった月を締めると、その月の売上・経費は変更できなくなります。", href: "/app/months", cta: "月次締めを開く" },
     shifts: { title: "来月の稼働を組む", body: "ドライバーの稼働希望を集め、枠を作って自動割当（下書き）→ 調整 → 確定します。", href: "/app/shifts", cta: "稼働スケジュールを開く" },

@@ -7,7 +7,7 @@
  */
 import { and, eq, gte, inArray, isNull, sql } from "drizzle-orm";
 import type { DB } from "@/db";
-import { actionCard, appUser, auditLog, division, slackPost } from "@/db/schema";
+import { actionCard, appUser, auditLog, division, SELF_COMPANY_ID, slackPost } from "@/db/schema";
 import { postToSlack, slackConfigured } from "@/adapters/slack";
 import { type Actor, ROLE_LABELS, type Role } from "@/lib/access";
 import { addDays, currentMonthJst, formatDate, todayJst } from "@/lib/dates";
@@ -15,7 +15,7 @@ import { appUrl } from "@/lib/env";
 import { formatYen } from "@/lib/money";
 import { getPL, getWorkQueue } from "./metrics";
 
-const SYSTEM: Actor = { userId: "00000000-0000-0000-0000-000000000000", name: "システム", email: null, role: "OWNER", divisionIds: [], demo: false } as unknown as Actor;
+const SYSTEM: Actor = { userId: "00000000-0000-0000-0000-000000000000", name: "システム", email: null, role: "OWNER", divisionIds: [], companyId: SELF_COMPANY_ID, demo: false };
 
 export type TaskBucket = "OVERDUE" | "TODAY" | "WEEK" | "LATER";
 export const BUCKET_LABEL: Record<TaskBucket, string> = { OVERDUE: "期限切れ", TODAY: "今日まで", WEEK: "今週中", LATER: "それ以降・期限なし" };
@@ -36,7 +36,7 @@ const ACTIVITY: [string, string[]][] = [
   ["日報の承認", ["report.approve"]],
   ["売上の計上", ["sale.create", "cleanup.import"]],
   ["入金の登録", ["receipt.create"]],
-  ["支払済み", ["payable.paid", "bank.match"]],
+  ["支払済み", ["payable.paid"]],
   ["稼働希望の提出", ["availability.submit"]],
   ["割当の確定", ["assignment.confirm"]],
   ["稼働明細の確定・公開", ["statement.confirmed", "statement.published"]],

@@ -1,6 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { getDb } from "@/db";
-import { getActor } from "@/lib/session";
+import { getCompanyActor } from "@/lib/session";
 import { AppError } from "@/lib/errors";
 import { scheduleWorkbook, type ScheduleScope, statementWorkbook } from "@/server/exports";
 import { contractPdf } from "@/server/contract-pdf";
@@ -17,7 +17,7 @@ function file(buf: Buffer, name: string, type: string) {
 
 /** /api/export/schedule?month=YYYY-MM&scope=all|division|project|driver&id=… ／ /api/export/statement?id=…&format=pdf|xlsx */
 export async function GET(req: NextRequest, { params }: { params: Promise<{ kind: string }> }) {
-  const actor = await getActor();
+  const actor = await getCompanyActor();
   if (!actor) return NextResponse.json({ error: "ログインが必要です" }, { status: 401 });
   const { kind } = await params;
   const sp = req.nextUrl.searchParams;

@@ -107,21 +107,21 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
           </Card>
 
           {cash ? (
-            <Card title="資金（銀行残高に基づく）" actions={<Link className="text-sm text-navy-700 underline" href="/app/bank">口座と取引</Link>}>
-              {!cash.hasBank ? (
-                <EmptyState title="銀行口座が登録されていません">「銀行口座」画面でデモ口座を追加するか、CSVを取り込んでください。</EmptyState>
-              ) : (
-                <>
-                  {cash.anyDemo && <div className="mb-3"><Notice tone="warn">デモ口座のデータが含まれています（実在しない口座・取引です）。</Notice></div>}
-                  <div className="grid grid-cols-2 gap-3">
-                    <Metric label="口座残高の合計" value={cash.bankTotal} note={`最終同期 ${formatDateTime(cash.lastSync)}`} />
-                    <Metric label={`資金余力（${cash.horizonDays}日）`} value={cash.cashCapacity} tone={cash.cashCapacity < cash.warningThreshold ? "bad" : undefined} note="残高 − 支払予定 ＋ 入金予定" />
-                    <Metric label={`入金予定（${cash.horizonDays}日以内）`} value={cash.receivablesDue} href="/app/sales?status=unpaid" note={cash.receivablesOverdue ? `期日超過 ${formatYen(cash.receivablesOverdue)}` : undefined} />
-                    <Metric label={`支払予定（${cash.horizonDays}日以内）`} value={cash.payablesDue} href="/app/payables" note={cash.payablesOverdue ? `期日超過 ${formatYen(cash.payablesOverdue)}` : undefined} />
-                  </div>
-                  <p className="mt-3 text-xs text-muted">資金余力は予算（社内ルール上使える額）とは別の指標です。</p>
-                </>
-              )}
+            <Card title="資金" actions={<Link className="text-sm text-navy-700 underline" href="/app/bank">入出金（公開分）</Link>}>
+              {cash.anyDemo && <div className="mb-3"><Notice tone="warn">デモ口座のデータが含まれています（実在しない口座・取引です）。</Notice></div>}
+              <div className="grid grid-cols-2 gap-3">
+                {cash.bankTotal !== null ? (
+                  <>
+                    <Metric label="実際の銀行残高の合計" value={cash.bankTotal} note="サービス提供者が表示を許可" />
+                    <Metric label={`資金余力（${cash.horizonDays}日）`} value={cash.cashCapacity} tone={cash.cashCapacity !== null && cash.cashCapacity < cash.warningThreshold ? "bad" : undefined} note="残高 − 支払予定 ＋ 入金予定" />
+                  </>
+                ) : cash.published ? (
+                  <Metric label="公開対象の入出金合計（差引）" value={cash.published.net} note={`公開された取引 ${cash.published.count}件のみ。実際の残高ではありません`} />
+                ) : null}
+                <Metric label={`入金予定（${cash.horizonDays}日以内）`} value={cash.receivablesDue} href="/app/sales?status=unpaid" note={cash.receivablesOverdue ? `期日超過 ${formatYen(cash.receivablesOverdue)}` : undefined} />
+                <Metric label={`支払予定（${cash.horizonDays}日以内）`} value={cash.payablesDue} href="/app/payables" note={cash.payablesOverdue ? `期日超過 ${formatYen(cash.payablesOverdue)}` : undefined} />
+              </div>
+              <p className="mt-3 text-xs text-muted">銀行の情報は、サービス提供者が本社向けに公開した範囲だけを表示しています。資金余力は予算（社内ルール上使える額）とは別の指標です。</p>
             </Card>
           ) : (
             <Card title="未収金">

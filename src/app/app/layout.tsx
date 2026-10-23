@@ -29,7 +29,7 @@ function items(a: Actor, q: Awaited<ReturnType<typeof getWorkQueue>>): { group: 
       { href: "/app/expenses", label: "経費", icon: "↘" },
       { href: "/app/approvals", label: "承認", icon: "✓", badge: q.pending_expenses + q.pending_reports + q.pending_budget_requests },
       isCompanyWide(a) && { href: "/app/payables", label: "支払予定", icon: "⇥" },
-      can.viewBank(a) && { href: "/app/bank", label: "銀行口座", icon: "⌂" },
+      can.viewBank(a) && { href: "/app/bank", label: "入出金（公開分）", icon: "⌂" },
       can.closeMonth(a) && { href: "/app/months", label: "月次締め", icon: "▣" },
     ]),
     g("取引", [

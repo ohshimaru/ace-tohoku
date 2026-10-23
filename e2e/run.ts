@@ -96,7 +96,7 @@ async function demoLogin(b: Browser, name: string, path = "/login") {
 }
 
 const STAFF_PAGES = ["/app", "/app/tasks", "/app/guide", "/app/actions", "/app/divisions", "/app/pl", "/app/budget", "/app/sales", "/app/expenses", "/app/approvals", "/app/payables", "/app/bank", "/app/months", "/app/partners", "/app/projects", "/app/contracts", "/app/contracts/templates", "/app/drivers", "/app/shifts", "/app/reports", "/app/statements", "/app/statements/rates", "/app/reminders", "/app/cleanup", "/app/settings", "/app/audit"];
-const DRIVER_PAGES = ["/d", "/d/availability", "/d/schedule", "/d/reports", "/d/reports/new", "/d/more", "/d/expenses", "/d/expenses/new", "/d/statements", "/d/profile", "/d/contracts"];
+const DRIVER_PAGES = ["/d", "/d/availability", "/d/schedule", "/d/reports", "/d/reports/new", "/d/more", "/d/expenses", "/d/expenses/new", "/d/statements", "/d/profile", "/d/contracts", "/d/finance"];
 
 async function scenario() {
   const [cur] = (await q<{ m: string }>("select to_char(now() at time zone 'Asia/Tokyo', 'YYYY-MM') m")).map((r) => r.m);
@@ -123,7 +123,7 @@ async function scenario() {
   const sns = new Browser(BASE);
   await demoLogin(sns, "SNS 責任者（デモ）");
   const bankDenied = await sns.get("/app/bank");
-  check("事業部責任者は銀行口座を見られない", has(bankDenied, "権限がありません"));
+  check("事業部責任者は入出金を見られない", has(bankDenied, "権限がありません"));
   const drvList = await sns.get("/app/drivers");
   check("SNS責任者には業務委託のドライバーが見えない", !has(drvList, "佐藤 一郎"));
   const [stmt] = await q<{ id: string; driver_id: string }>("select id, driver_id from statement where status = 'PUBLISHED' order by id limit 1");
@@ -228,16 +228,74 @@ async function scenario() {
   const gen = await dm.submit(st, `${prev.replace("-", "年")}月の明細を作成・再生成`);
   check("確定済みは再生成しても変わらない", has(gen, "確定済みのため変更なし 3件"), notice(gen));
 
-  console.log("● 5. 銀行・Clean Up・契約・メール");
+  console.log("● 5. 入出金（提供者・本社・スタッフ）・Clean Up・契約・メール");
+  const SELF = "00000000-0000-4000-8000-000000000001";
+  const prov = new Browser(BASE);
+  const pHome = await demoLogin(prov, "提供者 一郎（デモ）");
+  check("提供者はログイン後に提供者画面", has(pHome, "担当会社") && has(pHome, "サービス提供者画面"));
+  check("提供者には担当外の会社が表示されない", !has(pHome, "架空物産"));
+  for (const path of [`/p/${SELF}`, `/p/${SELF}/accounts`, `/p/${SELF}/disclosure`, `/p/${SELF}/preview`, `/p/${SELF}/audit`]) {
+    const pg = await prov.get(path);
+    check(`提供者 ${path.replace(SELF, "自社")}`, pg.status === 200 && !has(pg, "処理に失敗しました") && !has(pg, "Application error"), `status=${pg.status}`);
+  }
+  const [otherCo] = await q<{ id: string }>("select id from company where not is_self limit 1");
+  const pOther = await prov.get(`/p/${otherCo.id}`);
+  check("提供者は担当外の会社を開けない", pOther.status === 404 || pOther.html.includes("NEXT_HTTP_ERROR_FALLBACK;404"));
+  const pToApp = await prov.get("/app");
+  check("提供者は本社の画面に入れない", has(pToApp, "サービス提供者画面") && !has(pToApp, "経営ダッシュボード"));
+  const [bacc] = await q<{ id: string }>(`select id from bank_account where company_id = '${SELF}' limit 1`);
+  const csv = "日付,内容,入金,出金,残高\r\n2026/10/20,振込 テスト E2E,10000,,100000\r\n";
+  const imp1 = await prov.submit(await prov.get(`/p/${SELF}/accounts`), "明細CSVを取込", { file: { name: "bank.csv", type: "text/csv", bytes: new TextEncoder().encode(csv) } }, (f) => f.find("input[name=id]").attr("value") === bacc.id);
+  const imp2 = await prov.submit(await prov.get(`/p/${SELF}/accounts`), "明細CSVを取込", { file: { name: "bank.csv", type: "text/csv", bytes: new TextEncoder().encode(csv) } }, (f) => f.find("input[name=id]").attr("value") === bacc.id);
+  check("銀行CSVは2回目は取込済み", has(imp1, "新規 1件") && has(imp2, "新規 0件・取込済み 1件"), `${notice(imp1)} | ${notice(imp2)}`);
+  const [newT] = await q<{ id: string; publish_status: string; hq_visible: boolean }>("select id, publish_status::text, hq_visible from bank_transaction where description = '振込 テスト E2E'");
+  check("取り込んだ取引は下書き", newT.publish_status === "DRAFT" && !newT.hq_visible);
+  const pList = await prov.get(`/p/${SELF}`);
+  check("提供者の一覧に公開状況の列", has(pList, "本社公開") && has(pList, "スタッフ公開") && has(pList, "公開対象") && has(pList, "最終変更者") && has(pList, "振込 テスト E2E"));
+  const pDetail = await prov.get(`/p/${SELF}/t/${newT.id}`);
+  check("提供者の取引詳細（原本・表示先・訂正・集計対象外）", has(pDetail, "原本") && has(pDetail, "表示先") && has(pDetail, "訂正を追加") && has(pDetail, "集計対象外にする"));
+  const pPrev = await prov.get(`/p/${SELF}/preview?as=HQ`);
+  check("見え方の確認（本社）", has(pPrev, "表示されないもの") && has(pPrev, "公開対象の入出金合計"));
+  const [drv1] = await q<{ id: string }>("select id from app_user where email = 'driver1@demo.invalid'");
+  const pPrev2 = await prov.get(`/p/${SELF}/preview?as=${drv1.id}`);
+  check("見え方の確認（スタッフ）", pPrev2.status === 200 && has(pPrev2, "佐藤 一郎"));
+  const pExp = await prov.raw(`/api/finance/export?company=${SELF}`);
+  check("提供者のCSV出力", pExp.status === 200 && (await pExp.text()).includes("振込 テスト E2E"));
+  const pExpOther = await prov.raw(`/api/finance/export?company=${otherCo.id}`);
+  check("提供者は担当外の会社のCSVを出力できない", pExpOther.status === 404, `status=${pExpOther.status}`);
+
   const acct = new Browser(BASE);
   await demoLogin(acct, "経理 花子（デモ）");
   const bp = await acct.get("/app/bank");
-  check("銀行: デモ口座の表示", has(bp, "デモ銀行") && has(bp, "デモ"));
-  const [bacc] = await q<{ id: string }>("select id from bank_account limit 1");
-  const csv = "日付,内容,入金,出金,残高\r\n2026/10/20,振込 テスト,10000,,100000\r\n";
-  const imp1 = await acct.submit(bp, "明細CSVを取込", { file: { name: "bank.csv", type: "text/csv", bytes: new TextEncoder().encode(csv) } }, (f) => f.find("input[name=id]").attr("value") === bacc.id);
-  const imp2 = await acct.submit(await acct.get("/app/bank"), "明細CSVを取込", { file: { name: "bank.csv", type: "text/csv", bytes: new TextEncoder().encode(csv) } }, (f) => f.find("input[name=id]").attr("value") === bacc.id);
-  check("銀行CSVは2回目は取込済み", has(imp1, "新規 1件") && has(imp2, "新規 0件・取込済み 1件"), `${notice(imp1)} | ${notice(imp2)}`);
+  const [pub] = await q<{ id: string; description: string }>(`select t.id, t.description from bank_transaction t join bank_account a on a.id = t.account_id where a.company_id = '${SELF}' and t.publish_status = 'PUBLISHED' and t.hq_visible limit 1`);
+  const [hidden] = await q<{ id: string; description: string }>(`select t.id, t.description from bank_transaction t join bank_account a on a.id = t.account_id where a.company_id = '${SELF}' and not (t.publish_status = 'PUBLISHED' and t.hq_visible) and t.description not in (select description from bank_transaction where publish_status = 'PUBLISHED' and hq_visible) limit 1`);
+  check("本社: 公開対象の入出金合計として表示", has(bp, "公開対象の入出金合計") && has(bp, "実際の銀行残高や会社全体の収支ではありません"));
+  check("本社: 銀行の取込・連携の操作はない", !has(bp, "明細CSVを取込") && !has(bp, "口座を登録"));
+  check("本社: 公開した取引は見え、非公開は見えない", has(bp, pub.description) && !has(bp, "振込 テスト E2E") && (!hidden || !has(bp, hidden.description)));
+  const hqDraft = await acct.get(`/app/bank/${newT.id}`);
+  check("本社: 非公開の取引はURLを直接開いても見えない", (hqDraft.status === 404 || hqDraft.html.includes("NEXT_HTTP_ERROR_FALLBACK;404")) && !has(hqDraft, "振込 テスト E2E"));
+  const hqPub = await acct.get(`/app/bank/${pub.id}`);
+  check("本社: 公開した取引の詳細は開ける", hqPub.status === 200 && has(hqPub, pub.description));
+  const hqExp = await acct.raw("/api/finance/export");
+  check("本社: CSV出力は許可されるまで不可", hqExp.status === 403, `status=${hqExp.status}`);
+  const hqP = await acct.get(`/p/${SELF}`);
+  check("本社は提供者画面に入れない", !has(hqP, "サービス提供者画面") && !has(hqP, "公開状況"));
+  const hqAudit = await owner.get("/app/audit");
+  check("本社の監査ログに入出金の操作が出ない", !has(hqAudit, "表示先を変更") && !has(hqAudit, "明細CSV"));
+
+  const sato = new Browser(BASE);
+  await demoLogin(sato, "佐藤 一郎（デモ）", "/d/login");
+  const sMore = await sato.get("/d/more");
+  const sFin = await sato.get("/d/finance");
+  const [toSato] = await q<{ description: string }>(`select t.description from bank_transaction t join bank_txn_audience x on x.transaction_id = t.id and x.kind = 'USER' where x.target_id = '${drv1.id}' limit 1`);
+  check("スタッフ: 自分あての入出金が見える", has(sMore, "入出金（公開分）") && has(sFin, toSato.description) && !has(sFin, "振込 テスト E2E"), `more=${has(sMore, "入出金（公開分）")} fin=${sFin.status} ${toSato.description} ${text(sFin).slice(0, 300)}`);
+  check("スタッフ: 会社全体の残高は表示されない", !has(sFin, "実際の銀行残高"));
+  const suzuki = new Browser(BASE);
+  await demoLogin(suzuki, "鈴木 次郎（デモ）", "/d/login");
+  const zFin = await suzuki.get("/d/finance");
+  const satoOnly = await q<{ description: string }>(`select t.description from bank_transaction t join bank_txn_audience x on x.transaction_id = t.id and x.kind = 'USER' and x.target_id = '${drv1.id}'
+    where t.description not in (select t2.description from bank_transaction t2 join bank_txn_audience x2 on x2.transaction_id = t2.id and x2.kind = 'DIVISION' where t2.publish_status = 'PUBLISHED' and t2.staff_visible) limit 1`);
+  check("スタッフ: 他のスタッフあての入出金は見えない", zFin.status === 200 && (satoOnly.length === 0 || !has(zFin, satoOnly[0].description)), satoOnly[0]?.description);
   const cu = await acct.get("/app/cleanup");
   const cleanupCsv = "請求書番号,取引先コード,取引先,発行日,期間開始,期間終了,支払期限,小計,消費税,合計,入金済,状態\r\nINV-E2E-001,C001,杜の都ビル管理株式会社（デモ）,2026-10-31,2026-10-01,2026-10-31,2026-11-30,120000,12000,132000,0,issued\r\n";
   const ci = await acct.submit(cu, "取り込む", { file: { name: "invoices.csv", type: "text/csv", bytes: new TextEncoder().encode(cleanupCsv) } });

@@ -1,13 +1,13 @@
 import { getDb } from "@/db";
 import { MONTH_RE } from "@/lib/dates";
 import { AppError } from "@/lib/errors";
-import { getActor } from "@/lib/session";
+import { getCompanyActor } from "@/lib/session";
 import { exportExpensesCsv, exportSalesCsv, SALES_IMPORT_HEADER, toCsv } from "@/server/csv";
 
 export const dynamic = "force-dynamic";
 
 export async function GET(req: Request, ctx: { params: Promise<{ kind: string }> }) {
-  const actor = await getActor();
+  const actor = await getCompanyActor();
   if (!actor) return new Response("Unauthorized", { status: 401 });
   const { kind } = await ctx.params;
   const u = new URL(req.url);

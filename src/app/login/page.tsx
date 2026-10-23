@@ -3,7 +3,7 @@ import { ActionForm } from "@/components/action-form";
 import { DemoLogin } from "@/components/demo-login";
 import { Field, Input } from "@/components/ui";
 import { getDb } from "@/db";
-import { getActor } from "@/lib/session";
+import { getActor, homeFor } from "@/lib/session";
 import { listDemoUsers } from "@/server/auth";
 import { getSettings } from "@/server/masters";
 import { loginAction } from "./actions";
@@ -13,7 +13,7 @@ export const dynamic = "force-dynamic";
 
 export default async function LoginPage() {
   const a = await getActor();
-  if (a) redirect(a.role === "DRIVER" ? "/d" : "/app");
+  if (a) redirect(homeFor(a));
   const db = getDb();
   const [s, demo] = await Promise.all([getSettings(db), listDemoUsers(db)]);
   const form = (

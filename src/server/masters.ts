@@ -157,7 +157,8 @@ export async function updateStaff(db: DB, actor: Actor, id: string, raw: { role:
   if (role === "MANAGER" && divisionIds.length === 0) throw invalid("事業部責任者には担当事業部を1つ以上選んでください");
   await db.transaction(async (tx) => {
     const [u] = await tx.select().from(appUser).where(eq(appUser.id, id)).for("update");
-    if (!u || u.role === "DRIVER") throw notFound("利用者が見つかりません");
+    // ドライバー・サービス提供者・他社の利用者は本社から変更できない（提供者の権限は運営側のコマンドでのみ設定）
+    if (!u || u.role === "DRIVER" || u.role === "PROVIDER" || u.companyId !== actor.companyId) throw notFound("利用者が見つかりません");
     if (u.id === actor.userId && (role !== "OWNER" || status !== "ACTIVE")) throw invalid("自分自身の管理者権限を外したり停止したりはできません");
     if (u.role === "OWNER" && (role !== "OWNER" || status !== "ACTIVE")) {
       const [{ n }] = await tx.select({ n: sql<number>`count(*)::int` }).from(appUser).where(and(eq(appUser.role, "OWNER"), eq(appUser.status, "ACTIVE"), sql`${appUser.id} <> ${id}`));
@@ -234,7 +235,9 @@ export async function listAuditLogs(db: DB, actor: Actor, opts: { page?: string;
   const { auditLog } = await import("@/db/schema");
   const { desc: d } = await import("drizzle-orm");
   const page = Math.max(1, Number(opts.page) || 1);
-  const where = opts.entityType ? eq(auditLog.entityType, opts.entityType) : undefined;
+  // 入出金・銀行・公開設定の履歴は提供者だけが見る（本社の監査ログに非公開取引の内容を出さない）
+  const finance = sql`${auditLog.entityType} not in ('bank_transaction', 'bank_account', 'disclosure_policy', 'finance_export') and ${auditLog.action} not like 'bank.%'`;
+  const where = opts.entityType ? and(eq(auditLog.entityType, opts.entityType), finance) : finance;
   const rows = await db.select().from(auditLog).where(where).orderBy(d(auditLog.id)).limit(50).offset((page - 1) * 50);
   const [{ total }] = await db.select({ total: sql<number>`count(*)::int` }).from(auditLog).where(where);
   return { rows, total, page, limit: 50 };

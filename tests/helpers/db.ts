@@ -1,7 +1,7 @@
 import { sql } from "drizzle-orm";
 import { migrate } from "drizzle-orm/node-postgres/migrator";
 import { getDb } from "@/db";
-import { appUser, division, driver, expenseCategory, userDivision } from "@/db/schema";
+import { appUser, company, division, driver, expenseCategory, providerAssignment, userDivision } from "@/db/schema";
 import type { Actor, Role } from "@/lib/access";
 
 export async function resetDb() {
@@ -18,7 +18,7 @@ export async function makeUser(name: string, role: Role, opts: { divisionIds?: s
   const [u] = await db.insert(appUser).values({ name, email: `u${++n}-${Date.now()}@example.test`, role, status: "ACTIVE" }).returning();
   if (role === "MANAGER") for (const d of opts.divisionIds ?? []) await db.insert(userDivision).values({ userId: u.id, divisionId: d });
   if (role === "DRIVER") await db.insert(driver).values({ userId: u.id, divisionId: opts.driverDivisionId! });
-  return { userId: u.id, name, email: u.email, role, divisionIds: role === "MANAGER" ? (opts.divisionIds ?? []) : [], demo: false };
+  return { userId: u.id, name, email: u.email, role, divisionIds: role === "MANAGER" ? (opts.divisionIds ?? []) : [], companyId: u.companyId, demo: false };
 }
 
 export async function makeDivision(code: string, name: string, kind: "GENERAL" | "DRIVER" | "CLEANING" = "GENERAL") {
@@ -28,5 +28,18 @@ export async function makeDivision(code: string, name: string, kind: "GENERAL" |
 
 export async function makeCategory(name: string, isOutsourcing = false) {
   const [c] = await getDb().insert(expenseCategory).values({ name, isOutsourcing }).returning();
+  return c.id;
+}
+
+/** サービス提供者（担当会社を指定） */
+export async function makeProvider(name: string, companyIds: string[]): Promise<Actor> {
+  const db = getDb();
+  const [u] = await db.insert(appUser).values({ name, email: `p${++n}-${Date.now()}@example.test`, role: "PROVIDER", companyId: null, status: "ACTIVE" }).returning();
+  for (const c of companyIds) await db.insert(providerAssignment).values({ userId: u.id, companyId: c });
+  return { userId: u.id, name, email: u.email, role: "PROVIDER", divisionIds: [], companyId: null, demo: false };
+}
+
+export async function makeCompany(name: string) {
+  const [c] = await getDb().insert(company).values({ name }).returning();
   return c.id;
 }

@@ -1,31 +1,59 @@
 /**
- * 銀行口座・取引・照合
+ * 銀行口座・取引・照合（サービス提供者の操作。担当会社の口座・取引だけ）
  * - 口座番号は下4桁だけ保存（全桁・ログイン情報は保存しない）。送金・振込は行わない
+ * - 取り込んだ取引は「下書き」（提供者だけが見える）。本社・スタッフへの公開は provider-finance.ts
+ * - 本社・スタッフが入出金を見るときは finance-visibility.ts を通す（このファイルの一覧は提供者専用）
  * - 取引は (口座, 取引ID) で一意。同期・CSV取込を何度行っても重複しない
  * - 照合: 入金 ↔ 入金記録（売上）、出金 ↔ 支払予定。1つの入金記録・支払予定は1取引までに照合
  * - 銀行残高は「お金の実際の残高」。予算の使用可能額とは別に扱う（予算から残高は引かない）
  */
 import { createHash } from "node:crypto";
-import { and, asc, desc, eq, gte, isNull, lte, sql } from "drizzle-orm";
+import { and, asc, desc, eq, isNull, sql } from "drizzle-orm";
 import { z } from "zod";
 import type { DB, Tx } from "@/db";
 import { bankAccount, bankMatch, bankSyncRun, bankTransaction, payable, receipt } from "@/db/schema";
 import { providerFor } from "@/adapters/bank";
-import { type Actor, can } from "@/lib/access";
+import { type Actor, isProvider } from "@/lib/access";
 import { addDays, DATE_RE, todayJst } from "@/lib/dates";
 import { conflict, forbidden, invalid, notFound } from "@/lib/errors";
 import { writeAudit } from "./audit";
 import { parseCsv, stripGuard } from "./csv";
 import { assertMonthOpen } from "./months";
+import { assertProviderCompany } from "./finance-visibility";
 import { addReceipt } from "./sales";
 import { parse, zText } from "./validate";
 
-const view = (a: Actor) => {
-  if (!can.viewBank(a)) throw forbidden("銀行口座は経営者・経理のみ扱えます");
+const UUID = /^[0-9a-f-]{36}$/i;
+const onlyProvider = (a: Actor) => {
+  if (!isProvider(a)) throw forbidden("銀行口座はサービス提供者のみ扱えます");
 };
-const manage = (a: Actor) => {
-  if (!can.manageBank(a)) throw forbidden("銀行口座は経営者・経理のみ扱えます");
-};
+/** 口座が担当会社のものか（違えば「見つからない」） */
+async function accountFor(db: DB | Tx, actor: Actor, accountId: string) {
+  onlyProvider(actor);
+  if (!UUID.test(accountId)) throw notFound("口座が見つかりません");
+  const [a] = await db.select().from(bankAccount).where(eq(bankAccount.id, accountId)).limit(1);
+  if (!a) throw notFound("口座が見つかりません");
+  const c = await assertProviderCompany(db as DB, actor, a.companyId).catch(() => {
+    throw notFound("口座が見つかりません");
+  });
+  return { a, company: c };
+}
+/** 取引が担当会社のものか */
+export async function txnAccess(db: DB | Tx, actor: Actor, txnId: string) {
+  onlyProvider(actor);
+  if (!UUID.test(txnId)) throw notFound("取引が見つかりません");
+  const [r] = await db.select({ accountId: bankTransaction.accountId }).from(bankTransaction).where(eq(bankTransaction.id, txnId)).limit(1);
+  if (!r) throw notFound("取引が見つかりません");
+  return accountFor(db, actor, r.accountId).catch(() => {
+    throw notFound("取引が見つかりません");
+  });
+}
+/** 売上・支払予定との照合は自社（このシステムで売上・支払を管理している会社）の口座だけ */
+async function selfTxn(db: DB | Tx, actor: Actor, txnId: string) {
+  const x = await txnAccess(db, actor, txnId);
+  if (!x.company.is_self) throw invalid("この会社の売上・支払予定はこのシステムで管理していないため照合できません");
+  return x;
+}
 
 /* ---------------- 口座 ---------------- */
 
@@ -39,13 +67,14 @@ const accountInput = z.object({
   openingBalance: z.preprocess((v) => (v === "" || v == null ? undefined : v), z.coerce.number().int().optional()).optional(),
 });
 
-export async function createBankAccount(db: DB, actor: Actor, raw: z.input<typeof accountInput>) {
-  manage(actor);
+export async function createBankAccount(db: DB, actor: Actor, companyId: string, raw: z.input<typeof accountInput>) {
+  onlyProvider(actor);
+  await assertProviderCompany(db, actor, companyId);
   const input = parse(accountInput, raw);
   return db.transaction(async (tx) => {
     const [a] = await tx
       .insert(bankAccount)
-      .values({ bankName: input.provider === "DEMO" ? `【デモ】${input.bankName}` : input.bankName, branchName: input.branchName, accountType: input.accountType, accountNumberLast4: input.accountNumberLast4, holderName: input.holderName, provider: input.provider, isDemo: input.provider === "DEMO", balance: input.openingBalance ?? null, balanceAsOf: input.openingBalance != null ? new Date() : null })
+      .values({ companyId, bankName: input.provider === "DEMO" ? `【デモ】${input.bankName}` : input.bankName, branchName: input.branchName, accountType: input.accountType, accountNumberLast4: input.accountNumberLast4, holderName: input.holderName, provider: input.provider, isDemo: input.provider === "DEMO", balance: input.openingBalance ?? null, balanceAsOf: input.openingBalance != null ? new Date() : null })
       .returning({ id: bankAccount.id });
     await writeAudit(tx, actor, { action: "bank.account_create", entityType: "bank_account", entityId: a.id, summary: `銀行口座 ${input.bankName} ${input.branchName} ****${input.accountNumberLast4} を登録（${input.provider === "DEMO" ? "デモ" : "CSV取込"}）` });
     return a.id;
@@ -53,7 +82,7 @@ export async function createBankAccount(db: DB, actor: Actor, raw: z.input<typeo
 }
 
 export async function archiveBankAccount(db: DB, actor: Actor, id: string) {
-  manage(actor);
+  await accountFor(db, actor, id);
   await db.transaction(async (tx) => {
     const [a] = await tx.update(bankAccount).set({ archivedAt: new Date() }).where(and(eq(bankAccount.id, id), isNull(bankAccount.archivedAt))).returning();
     if (!a) throw notFound();
@@ -61,22 +90,24 @@ export async function archiveBankAccount(db: DB, actor: Actor, id: string) {
   });
 }
 
-export async function listBankAccounts(db: DB, actor: Actor) {
-  view(actor);
+export async function listBankAccounts(db: DB, actor: Actor, companyId: string) {
+  onlyProvider(actor);
+  await assertProviderCompany(db, actor, companyId);
   return db
     .select({ a: bankAccount, unmatched: sql<number>`(select count(*)::int from bank_transaction t where t.account_id = ${bankAccount.id} and t.classification in ('UNCLASSIFIED','SALES_RECEIPT','EXPENSE_PAYMENT','STATEMENT_PAYMENT') and not exists (select 1 from bank_match m where m.transaction_id = t.id and m.unmatched_at is null))` })
     .from(bankAccount)
-    .where(isNull(bankAccount.archivedAt))
+    .where(and(eq(bankAccount.companyId, companyId), isNull(bankAccount.archivedAt)))
     .orderBy(asc(bankAccount.bankName));
 }
 
 /* ---------------- 同期・取込 ---------------- */
 
-async function insertTxns(tx: Tx, accountId: string, rows: { externalId: string; txnDate: string; amount: number; description: string; balanceAfter: number | null }[]) {
+async function insertTxns(tx: Tx, accountId: string, source: string, rows: { externalId: string; txnDate: string; amount: number; description: string; balanceAfter: number | null }[]) {
   if (!rows.length) return { imported: 0, skipped: 0 };
+  // 新しく取り込んだ取引は「下書き」（本社・スタッフには非公開）。公開は提供者が個別に行う
   const r = await tx
     .insert(bankTransaction)
-    .values(rows.map((x) => ({ ...x, accountId })))
+    .values(rows.map((x) => ({ ...x, accountId, source, publishStatus: "DRAFT" as const, hqVisible: false, staffVisible: false })))
     .onConflictDoNothing({ target: [bankTransaction.accountId, bankTransaction.externalId] })
     .returning({ id: bankTransaction.id });
   return { imported: r.length, skipped: rows.length - r.length };
@@ -84,7 +115,7 @@ async function insertTxns(tx: Tx, accountId: string, rows: { externalId: string;
 
 /** 同期（デモ口座のみ。実際の銀行APIは未接続）。失敗は記録して画面・行動カードに表示 */
 export async function syncBankAccount(db: DB, actor: Actor | null, accountId: string) {
-  if (actor) manage(actor);
+  if (actor) await accountFor(db, actor, accountId);
   const [a] = await db.select().from(bankAccount).where(eq(bankAccount.id, accountId)).limit(1);
   if (!a || a.archivedAt) throw notFound("口座が見つかりません");
   const provider = providerFor(a.provider);
@@ -94,7 +125,7 @@ export async function syncBankAccount(db: DB, actor: Actor | null, accountId: st
     const since = a.lastSyncedAt ? addDays(todayJst(a.lastSyncedAt), -3) : addDays(todayJst(), -30);
     const res = await provider.fetch(a, since);
     return await db.transaction(async (tx) => {
-      const r = await insertTxns(tx, accountId, res.transactions);
+      const r = await insertTxns(tx, accountId, a.provider, res.transactions);
       await tx.update(bankAccount).set({ balance: res.balance, balanceAsOf: res.balanceAsOf, lastSyncedAt: new Date(), syncStatus: "OK", lastError: null }).where(eq(bankAccount.id, accountId));
       await tx.update(bankSyncRun).set({ status: "OK", finishedAt: new Date(), imported: r.imported, skipped: r.skipped }).where(eq(bankSyncRun.id, run.id));
       if (actor) await writeAudit(tx, actor, { action: "bank.sync", entityType: "bank_account", entityId: accountId, summary: `口座を同期（新規 ${r.imported}件・既存 ${r.skipped}件）` });
@@ -116,7 +147,7 @@ export const BANK_CSV_HEADER = ["日付", "内容", "入金", "出金", "残高"
  * すべての行が正しい場合だけ取り込む
  */
 export async function importBankCsv(db: DB, actor: Actor, accountId: string, fileName: string, text: string) {
-  manage(actor);
+  await accountFor(db, actor, accountId);
   const [a] = await db.select().from(bankAccount).where(eq(bankAccount.id, accountId)).limit(1);
   if (!a || a.archivedAt) throw notFound("口座が見つかりません");
   const rows = parseCsv(text).filter((r) => r.some((c) => c.trim() !== ""));
@@ -152,7 +183,7 @@ export async function importBankCsv(db: DB, actor: Actor, accountId: string, fil
   });
   if (errors.length) throw invalid(`取り込めませんでした（${errors.length}件の誤り）\n${errors.slice(0, 20).join("\n")}`);
   return db.transaction(async (tx) => {
-    const r = await insertTxns(tx, accountId, out);
+    const r = await insertTxns(tx, accountId, "CSV", out);
     const last = [...out].sort((x, y) => x.txnDate.localeCompare(y.txnDate)).filter((x) => x.balanceAfter != null).pop();
     await tx.update(bankAccount).set({ ...(last ? { balance: last.balanceAfter, balanceAsOf: new Date(`${last.txnDate}T23:59:00+09:00`) } : {}), lastSyncedAt: new Date(), syncStatus: "OK", lastError: null }).where(eq(bankAccount.id, accountId));
     await tx.insert(bankSyncRun).values({ accountId, kind: "CSV", status: "OK", finishedAt: new Date(), imported: r.imported, skipped: r.skipped });
@@ -165,57 +196,41 @@ export async function importBankCsv(db: DB, actor: Actor, accountId: string, fil
 
 const ACTIVE_MATCH = sql`m.unmatched_at is null`;
 
-export async function listTransactions(db: DB, actor: Actor, opts: { accountId?: string; view?: string; from?: string; to?: string } = {}) {
-  view(actor);
-  return db
-    .select({
-      t: bankTransaction,
-      bankName: bankAccount.bankName,
-      isDemo: bankAccount.isDemo,
-      matched: sql<number>`(select coalesce(sum(m.amount), 0)::int from bank_match m where m.transaction_id = ${bankTransaction.id} and ${ACTIVE_MATCH})`,
-    })
-    .from(bankTransaction)
-    .innerJoin(bankAccount, eq(bankAccount.id, bankTransaction.accountId))
-    .where(
-      and(
-        opts.accountId ? eq(bankTransaction.accountId, opts.accountId) : undefined,
-        opts.from ? gte(bankTransaction.txnDate, opts.from) : undefined,
-        opts.to ? lte(bankTransaction.txnDate, opts.to) : undefined,
-        opts.view === "unmatched" ? sql`${bankTransaction.classification} in ('UNCLASSIFIED','SALES_RECEIPT','EXPENSE_PAYMENT','STATEMENT_PAYMENT') and not exists (select 1 from bank_match m where m.transaction_id = ${bankTransaction.id} and ${ACTIVE_MATCH})` : undefined,
-      ),
-    )
-    .orderBy(desc(bankTransaction.txnDate), desc(bankTransaction.importedAt))
-    .limit(300);
+/** 表示・照合に使う金額（訂正があれば最新の訂正後の金額） */
+async function effAmount(db: DB | Tx, id: string) {
+  const [r] = (await db.execute<{ amount: number }>(sql`select eff_amount amount from bank_txn_effective where id = ${id}`)).rows;
+  return r.amount;
 }
 
 async function lockTxn(tx: Tx, id: string) {
   const [t] = await tx.select().from(bankTransaction).where(eq(bankTransaction.id, id)).for("update");
   if (!t) throw notFound("取引が見つかりません");
   const [{ used }] = (await tx.execute<{ used: number }>(sql`select coalesce(sum(amount), 0)::int used from bank_match m where m.transaction_id = ${id} and ${ACTIVE_MATCH}`)).rows;
-  return { t, remaining: Math.abs(t.amount) - used };
+  const amount = await effAmount(tx, id);
+  return { t: { ...t, amount }, remaining: Math.abs(amount) - used };
 }
 
 export async function getTransaction(db: DB, actor: Actor, id: string) {
-  view(actor);
-  const [r] = await db.select({ t: bankTransaction, a: bankAccount }).from(bankTransaction).innerJoin(bankAccount, eq(bankAccount.id, bankTransaction.accountId)).where(eq(bankTransaction.id, id)).limit(1);
-  if (!r) throw notFound("取引が見つかりません");
+  const access = await txnAccess(db, actor, id);
+  const [r0] = await db.select({ t: bankTransaction, a: bankAccount }).from(bankTransaction).innerJoin(bankAccount, eq(bankAccount.id, bankTransaction.accountId)).where(eq(bankTransaction.id, id)).limit(1);
+  if (!r0) throw notFound("取引が見つかりません");
+  const r = { ...r0, effAmount: await effAmount(db, id), company: access.company };
   const matches = await db.execute<{ id: string; target_type: string; target_id: string; amount: number; matched_at: Date; unmatched_at: Date | null; label: string | null }>(sql`
     select m.id, m.target_type, m.target_id, m.amount, m.matched_at, m.unmatched_at,
       case when m.target_type = 'RECEIPT' then (select s.description || '（' || coalesce(p.name, '') || '）' from receipt r join sale s on s.id = r.sale_id left join partner p on p.id = s.customer_id where r.id = m.target_id)
            else (select y.payee_name || '：' || y.description from payable y where y.id = m.target_id) end label
     from bank_match m where m.transaction_id = ${id} order by m.matched_at desc`);
   const used = matches.rows.filter((m) => !m.unmatched_at).reduce((s, m) => s + m.amount, 0);
-  return { ...r, matches: matches.rows, remaining: Math.abs(r.t.amount) - used };
+  return { ...r, matches: matches.rows, remaining: Math.abs(r.effAmount) - used };
 }
 
 /** 照合候補（金額が一致するものを優先。日付の近いもの） */
 export async function matchCandidates(db: DB, actor: Actor, id: string) {
-  view(actor);
   const x = await getTransaction(db, actor, id);
   const t = x.t;
   const amt = x.remaining;
-  if (amt <= 0) return { receipts: [], sales: [], payables: [] };
-  if (t.amount > 0) {
+  if (amt <= 0 || !x.company.is_self) return { receipts: [], sales: [], payables: [] };
+  if (x.effAmount > 0) {
     const receipts = await db.execute<{ id: string; received_on: string; amount: number; description: string; customer: string | null }>(sql`
       select r.id, r.received_on, r.amount, s.description, p.name customer from receipt r join sale s on s.id = r.sale_id left join partner p on p.id = s.customer_id
       where r.canceled_at is null and r.amount <= ${amt}
@@ -239,7 +254,7 @@ export async function matchCandidates(db: DB, actor: Actor, id: string) {
 
 /** 入金取引 → 既存の入金記録に照合 */
 export async function matchReceipt(db: DB, actor: Actor, txnId: string, receiptId: string) {
-  manage(actor);
+  await selfTxn(db, actor, txnId);
   await db.transaction(async (tx) => {
     const { t, remaining } = await lockTxn(tx, txnId);
     if (t.amount <= 0) throw invalid("入金の取引ではありません");
@@ -260,13 +275,13 @@ export async function matchReceipt(db: DB, actor: Actor, txnId: string, receiptI
 
 /** 入金取引 → 売上に入金を登録して照合（同じ操作を繰り返しても入金は1件） */
 export async function receiveFromTxn(db: DB, actor: Actor, txnId: string, saleId: string, amount?: number) {
-  manage(actor);
+  await selfTxn(db, actor, txnId);
   const [t] = await db.select().from(bankTransaction).where(eq(bankTransaction.id, txnId)).limit(1);
-  if (!t || t.amount <= 0) throw invalid("入金の取引ではありません");
   const x = await getTransaction(db, actor, txnId);
+  if (!t || x.effAmount <= 0) throw invalid("入金の取引ではありません");
   const apply = amount ?? x.remaining;
   if (apply <= 0 || apply > x.remaining) throw invalid("照合する金額が正しくありません");
-  const r = await addReceipt(db, actor, { saleId, receivedOn: t.txnDate, amount: String(apply), note: `銀行取引から登録（${t.description.slice(0, 40)}）`, idempotencyKey: `bank:${txnId}:${saleId}` }, { bankTransactionId: txnId });
+  const r = await addReceipt(db, actor, { saleId, receivedOn: t.txnDate, amount: String(apply), note: `銀行取引から登録（${t.description.slice(0, 40)}）`, idempotencyKey: `bank:${txnId}:${saleId}` }, { bankTransactionId: txnId, viaProviderMatch: true });
   const [already] = await db.select({ id: bankMatch.id }).from(bankMatch).where(and(eq(bankMatch.targetType, "RECEIPT"), eq(bankMatch.targetId, r.id), isNull(bankMatch.unmatchedAt))).limit(1);
   if (!already) {
     try {
@@ -281,7 +296,7 @@ export async function receiveFromTxn(db: DB, actor: Actor, txnId: string, saleId
 
 /** 出金取引 → 支払予定に照合（支払予定は「支払済み」になる） */
 export async function matchPayable(db: DB, actor: Actor, txnId: string, payableId: string) {
-  manage(actor);
+  await selfTxn(db, actor, txnId);
   await db.transaction(async (tx) => {
     const { t, remaining } = await lockTxn(tx, txnId);
     if (t.amount >= 0) throw invalid("出金の取引ではありません");
@@ -304,8 +319,12 @@ function rethrowMatchConflict(e: unknown): never {
 
 /** 照合の解除（記録は残す）。支払予定は未払いに戻し、取引から作った入金記録は取消す */
 export async function unmatch(db: DB, actor: Actor, matchId: string, reason: string) {
-  manage(actor);
+  onlyProvider(actor);
   const why = parse(zText("解除の理由", 300), reason);
+  if (!UUID.test(matchId)) throw notFound("照合が見つかりません");
+  const [m0] = await db.select().from(bankMatch).where(eq(bankMatch.id, matchId)).limit(1);
+  if (!m0) throw notFound("照合が見つかりません");
+  await selfTxn(db, actor, m0.transactionId);
   await db.transaction(async (tx) => {
     const [m] = await tx.select().from(bankMatch).where(eq(bankMatch.id, matchId)).for("update");
     if (!m || m.unmatchedAt) throw notFound("照合が見つかりません");
@@ -323,19 +342,10 @@ export async function unmatch(db: DB, actor: Actor, matchId: string, reason: str
   });
 }
 
-export async function classifyTransaction(db: DB, actor: Actor, id: string, classification: string, note: string) {
-  manage(actor);
-  const c = parse(z.enum(["UNCLASSIFIED", "SALES_RECEIPT", "EXPENSE_PAYMENT", "STATEMENT_PAYMENT", "TRANSFER", "LOAN", "TAX", "OTHER"]), classification);
-  await db.transaction(async (tx) => {
-    const [t] = await tx.update(bankTransaction).set({ classification: c, note: note.trim().slice(0, 300) || null }).where(eq(bankTransaction.id, id)).returning();
-    if (!t) throw notFound();
-    await writeAudit(tx, actor, { action: "bank.classify", entityType: "bank_transaction", entityId: id, summary: `取引（${t.txnDate} ${t.amount}円）の区分を ${c} に設定` });
-  });
-}
-
-export async function listSyncRuns(db: DB, actor: Actor) {
-  view(actor);
-  return db.select({ r: bankSyncRun, bankName: bankAccount.bankName }).from(bankSyncRun).leftJoin(bankAccount, eq(bankAccount.id, bankSyncRun.accountId)).orderBy(desc(bankSyncRun.startedAt)).limit(30);
+export async function listSyncRuns(db: DB, actor: Actor, companyId: string) {
+  onlyProvider(actor);
+  await assertProviderCompany(db, actor, companyId);
+  return db.select({ r: bankSyncRun, bankName: bankAccount.bankName }).from(bankSyncRun).innerJoin(bankAccount, eq(bankAccount.id, bankSyncRun.accountId)).where(eq(bankAccount.companyId, companyId)).orderBy(desc(bankSyncRun.startedAt)).limit(30);
 }
 
 /** 定期処理: 自動同期できる口座を同期（失敗は記録のみ） */

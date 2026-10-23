@@ -64,6 +64,7 @@ export async function actorFromToken(db: DB, token: string | undefined): Promise
     email: row.u.email,
     role: row.u.role as Role,
     divisionIds: divs.map((d) => d.id),
+    companyId: row.u.role === "PROVIDER" ? null : row.u.companyId,
     demo: row.s.demo,
   };
 }
@@ -118,6 +119,6 @@ export async function listDemoUsers(db: DB) {
   return db
     .select({ id: appUser.id, name: appUser.name, role: appUser.role })
     .from(appUser)
-    .where(and(eq(appUser.status, "ACTIVE"), inArray(appUser.role, ["OWNER", "ACCOUNTING", "MANAGER", "DRIVER"]), demoUserOnly() ? like(appUser.email, `%${DEMO_EMAIL_DOMAIN}`) : undefined))
+    .where(and(eq(appUser.status, "ACTIVE"), inArray(appUser.role, ["OWNER", "ACCOUNTING", "MANAGER", "DRIVER", "PROVIDER"]), demoUserOnly() ? like(appUser.email, `%${DEMO_EMAIL_DOMAIN}`) : undefined))
     .orderBy(appUser.role, appUser.name);
 }

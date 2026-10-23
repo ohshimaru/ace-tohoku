@@ -1,7 +1,7 @@
 import { eq, sql } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { closeDb, getDb } from "@/db";
-import { bankTransaction, monthClose, partner, payable, receipt, sale } from "@/db/schema";
+import { bankTransaction, monthClose, partner, payable, receipt, sale, SELF_COMPANY_ID } from "@/db/schema";
 import type { Actor } from "@/lib/access";
 import { addOtherPayable, createSale } from "@/server/sales";
 import { createBankAccount, getTransaction, importBankCsv, matchCandidates, matchPayable, receiveFromTxn, syncBankAccount, unmatch } from "@/server/bank";
@@ -11,9 +11,9 @@ import { closePeriod, openPeriod } from "@/server/shifts";
 import { retryEmail, saveReminderRules } from "@/server/mailer";
 import { csvCell } from "@/server/csv";
 import { emailOutbox } from "@/db/schema";
-import { makeDivision, makeUser, resetDb } from "./helpers/db";
+import { makeDivision, makeProvider, makeUser, resetDb } from "./helpers/db";
 
-let owner: Actor, acct: Actor, mgr: Actor, mgr2: Actor, otherMgr: Actor, drv: Actor;
+let prov: Actor, owner: Actor, acct: Actor, mgr: Actor, mgr2: Actor, otherMgr: Actor, drv: Actor;
 let dSns = "", dCln = "", dDrv = "", customer = "", contractor = "";
 
 beforeAll(async () => {
@@ -27,6 +27,7 @@ beforeAll(async () => {
   mgr2 = await makeUser("SNS副責任者", "MANAGER", { divisionIds: [dSns] });
   otherMgr = await makeUser("清掃責任者", "MANAGER", { divisionIds: [dCln] });
   drv = await makeUser("ドライバー", "DRIVER", { driverDivisionId: dDrv });
+  prov = await makeProvider("提供者", [SELF_COMPANY_ID]);
   const db = getDb();
   [{ id: customer }] = await db.insert(partner).values({ name: "株式会社みらい商事", isCustomer: true }).returning({ id: partner.id });
   [{ id: contractor }] = await db.insert(partner).values({ name: "山田デザイン", isContractor: true, isCustomer: true }).returning({ id: partner.id });
@@ -37,18 +38,19 @@ const CSV = (rows: string[]) => ["日付,内容,入金,出金,残高", ...rows].
 
 describe("銀行: 取込・同期は重複しない", () => {
   let acc = "";
-  it("責任者は銀行を扱えない／口座番号は下4桁のみ", async () => {
+  it("銀行はサービス提供者だけが扱える（経営者・責任者は不可）／口座番号は下4桁のみ", async () => {
     const db = getDb();
-    await expect(createBankAccount(db, mgr, { bankName: "七十七銀行", branchName: "本店", accountNumberLast4: "1234" })).rejects.toThrow(/経営者・経理/);
-    await expect(createBankAccount(db, acct, { bankName: "七十七銀行", branchName: "本店", accountNumberLast4: "1234567" })).rejects.toThrow(/下4桁/);
-    acc = await createBankAccount(db, acct, { bankName: "七十七銀行", branchName: "本店", accountNumberLast4: "1234", openingBalance: "1000000" });
+    await expect(createBankAccount(db, mgr, SELF_COMPANY_ID, { bankName: "七十七銀行", branchName: "本店", accountNumberLast4: "1234" })).rejects.toThrow(/サービス提供者/);
+    await expect(createBankAccount(db, owner, SELF_COMPANY_ID, { bankName: "七十七銀行", branchName: "本店", accountNumberLast4: "1234" })).rejects.toThrow(/サービス提供者/);
+    await expect(createBankAccount(db, prov, SELF_COMPANY_ID, { bankName: "七十七銀行", branchName: "本店", accountNumberLast4: "1234567" })).rejects.toThrow(/下4桁/);
+    acc = await createBankAccount(db, prov, SELF_COMPANY_ID, { bankName: "七十七銀行", branchName: "本店", accountNumberLast4: "1234", openingBalance: "1000000" });
   });
 
   it("同じCSVを2回取り込んでも1回分。同じ内容の行が2つあれば2件", async () => {
     const db = getDb();
     const text = CSV(["2026/09/30,振込 ミライシヨウジ,110000,,1110000", "2026/10/01,手数料,,440,1109560", "2026/10/01,手数料,,440,1109560", "2026/10/02,=cmd|' /C calc'!A0,,33000,1076560"]);
-    const a = await importBankCsv(db, acct, acc, "a.csv", text);
-    const b = await importBankCsv(db, acct, acc, "a.csv", text);
+    const a = await importBankCsv(db, prov, acc, "a.csv", text);
+    const b = await importBankCsv(db, prov, acc, "a.csv", text);
     expect(a).toEqual({ imported: 4, skipped: 0 });
     expect(b).toEqual({ imported: 0, skipped: 4 });
     const rows = await db.select().from(bankTransaction).where(eq(bankTransaction.accountId, acc));
@@ -56,17 +58,17 @@ describe("銀行: 取込・同期は重複しない", () => {
     // 取込データはそのまま保存し、CSV・Excel出力時に数式として扱われないようにする（画面表示はエスケープ）
     const { csvCell } = await import("@/server/csv");
     expect(csvCell(rows.find((r) => r.amount === -33000)!.description).startsWith("'=")).toBe(true);
-    await expect(importBankCsv(db, acct, acc, "b.csv", CSV(["2026/10/03,両方,100,100,0"]))).rejects.toThrow(/どちらか一方/);
+    await expect(importBankCsv(db, prov, acc, "b.csv", CSV(["2026/10/03,両方,100,100,0"]))).rejects.toThrow(/どちらか一方/);
   });
 
   it("デモ口座の同期は何度実行しても重複しない／CSV口座は自動同期しない", async () => {
     const db = getDb();
-    const demo = await createBankAccount(db, owner, { bankName: "デモ銀行", branchName: "デモ支店", accountNumberLast4: "0000", provider: "DEMO" });
-    const r1 = await syncBankAccount(db, owner, demo);
-    const r2 = await syncBankAccount(db, owner, demo);
+    const demo = await createBankAccount(db, prov, SELF_COMPANY_ID, { bankName: "デモ銀行", branchName: "デモ支店", accountNumberLast4: "0000", provider: "DEMO" });
+    const r1 = await syncBankAccount(db, prov, demo);
+    const r2 = await syncBankAccount(db, prov, demo);
     expect(r1.imported).toBeGreaterThan(0);
     expect(r2.imported).toBe(0);
-    await expect(syncBankAccount(db, owner, acc)).rejects.toThrow(/CSV/);
+    await expect(syncBankAccount(db, prov, acc)).rejects.toThrow(/CSV/);
   });
 
   it("出金を支払予定に照合 → 支払済み。二重照合は不可。解除で未払いに戻る", async () => {
@@ -74,16 +76,16 @@ describe("銀行: 取込・同期は重複しない", () => {
     await addOtherPayable(db, acct, { payeeName: "デザイン外注", description: "9月分", amount: "33000", dueDate: "2026-10-02" });
     const [p] = await db.select().from(payable).where(eq(payable.payeeName, "デザイン外注"));
     const [t] = await db.select().from(bankTransaction).where(eq(bankTransaction.amount, -33000));
-    const c = await matchCandidates(db, acct, t.id);
+    const c = await matchCandidates(db, prov, t.id);
     expect(c.payables[0].id).toBe(p.id);
-    await matchPayable(db, acct, t.id, p.id);
+    await matchPayable(db, prov, t.id, p.id);
     const [paid] = await db.select().from(payable).where(eq(payable.id, p.id));
     expect(paid.status).toBe("PAID");
     expect(paid.paidOn).toBe("2026-10-02");
-    await expect(matchPayable(db, acct, t.id, p.id)).rejects.toThrow();
-    const x = await getTransaction(db, acct, t.id);
+    await expect(matchPayable(db, prov, t.id, p.id)).rejects.toThrow();
+    const x = await getTransaction(db, prov, t.id);
     expect(x.remaining).toBe(0);
-    await unmatch(db, acct, x.matches[0].id, "誤り");
+    await unmatch(db, prov, x.matches[0].id, "誤り");
     const [back] = await db.select().from(payable).where(eq(payable.id, p.id));
     expect(back.status).toBe("SCHEDULED");
     expect(back.bankTransactionId).toBeNull();
@@ -93,14 +95,14 @@ describe("銀行: 取込・同期は重複しない", () => {
     const db = getDb();
     const saleId = await createSale(db, acct, { recognizedOn: "2026-09-30", divisionId: dSns, customerId: customer, description: "SNS運用 9月", amountExTax: "100000", taxRate: 10 });
     const [t] = await db.select().from(bankTransaction).where(eq(bankTransaction.amount, 110000));
-    const [a, b] = await Promise.all([receiveFromTxn(db, acct, t.id, saleId), receiveFromTxn(db, acct, t.id, saleId)]);
+    const [a, b] = await Promise.all([receiveFromTxn(db, prov, t.id, saleId), receiveFromTxn(db, prov, t.id, saleId)]);
     expect(a.id).toBe(b.id);
     const rs = await db.select().from(receipt).where(eq(receipt.saleId, saleId));
     expect(rs).toHaveLength(1);
-    const x = await getTransaction(db, acct, t.id);
+    const x = await getTransaction(db, prov, t.id);
     expect(x.matches.filter((m) => !m.unmatched_at)).toHaveLength(1);
     expect(x.remaining).toBe(0);
-    await unmatch(db, acct, x.matches[0].id, "別の売上だった");
+    await unmatch(db, prov, x.matches[0].id, "別の売上だった");
     const [r] = await db.select().from(receipt).where(eq(receipt.saleId, saleId));
     expect(r.canceledAt).not.toBeNull();
   });

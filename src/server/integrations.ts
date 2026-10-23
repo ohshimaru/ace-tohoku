@@ -1,5 +1,4 @@
 /** 外部接続の状態（画面に「未接続 / デモ / 実接続」を表示する） */
-import { sql } from "drizzle-orm";
 import type { DB } from "@/db";
 import { emailDriver } from "@/adapters/email";
 import { storageDriver } from "@/adapters/storage";
@@ -9,15 +8,12 @@ export type ConnState = "LIVE" | "DEMO" | "NONE";
 export type Conn = { key: string; label: string; state: ConnState; detail: string };
 
 export async function connectionStatus(db: DB): Promise<Conn[]> {
-  const bank = await db.execute<{ demo: number; live: number; csv: number }>(sql`
-    select count(*) filter (where is_demo)::int demo, count(*) filter (where not is_demo and provider not in ('CSV','DEMO'))::int live,
-      count(*) filter (where provider = 'CSV' and not is_demo)::int csv from bank_account where archived_at is null`);
-  const b = bank.rows[0];
+  void db;
   const line = !!(process.env.LINE_CHANNEL_ID && process.env.LINE_CHANNEL_SECRET);
   const mail = emailDriver();
   const llm = !!process.env.ANTHROPIC_API_KEY;
   return [
-    { key: "bank", label: "銀行連携", state: b.live ? "LIVE" : b.demo ? "DEMO" : "NONE", detail: b.live ? "連携サービス経由" : b.demo ? "デモ口座・デモ取引（実在しない口座）" : b.csv ? "CSV取込のみ（API未接続）" : "未接続（口座未登録）" },
+    { key: "bank", label: "銀行連携", state: "NONE", detail: "サービス提供者が管理（銀行API・口座情報サービスは未接続。CSV取込とデモ口座）。本社には提供者が公開した入出金だけが表示されます" },
     { key: "line", label: "LINEログイン", state: line ? "LIVE" : demoLoginAllowed() ? "DEMO" : "NONE", detail: line ? "LINE Login チャネル設定済み" : demoLoginAllowed() ? "未設定（開発環境のデモログインのみ）" : "未設定（ドライバーはログインできません）" },
     { key: "email", label: "メール送信", state: mail === "console" ? "DEMO" : "LIVE", detail: mail === "console" ? "送信せず履歴に記録のみ" : mail === "smtp" ? "SMTPで送信" : "Resendで送信" },
     { key: "storage", label: "ファイル保存", state: storageDriver() === "local" ? "DEMO" : "LIVE", detail: storageDriver() === "supabase" ? "Supabase Storage（非公開）" : storageDriver() === "db" ? "データベース内に非公開で保存" : "サーバーのディスク（開発用）" },

@@ -3,7 +3,7 @@ import { lineConfigured } from "@/adapters/line";
 import { DemoLogin } from "@/components/demo-login";
 import { Notice } from "@/components/ui";
 import { getDb } from "@/db";
-import { getActor } from "@/lib/session";
+import { getActor, homeFor } from "@/lib/session";
 import { listDemoUsers } from "@/server/auth";
 import { getSettings } from "@/server/masters";
 
@@ -26,7 +26,7 @@ const MESSAGES: Record<string, { tone: "ok" | "warn" | "bad" | "info"; text: str
 
 export default async function DriverLogin({ searchParams }: { searchParams: Promise<{ e?: string; flash?: string }> }) {
   const a = await getActor();
-  if (a) redirect(a.role === "DRIVER" ? "/d" : "/app");
+  if (a) redirect(homeFor(a));
   const sp = await searchParams;
   const db = getDb();
   const [s, demo] = await Promise.all([getSettings(db), listDemoUsers(db)]);

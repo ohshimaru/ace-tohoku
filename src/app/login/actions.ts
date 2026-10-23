@@ -6,7 +6,8 @@ import { getDb } from "@/db";
 import { trustedIpHeader } from "@/lib/env";
 import { type ActionResult, str } from "@/lib/action";
 import { AppError } from "@/lib/errors";
-import { clearSessionCookie, getActor, setSessionCookie } from "@/lib/session";
+import { clearSessionCookie, getActor, homeFor, setSessionCookie } from "@/lib/session";
+import type { Role } from "@/lib/access";
 import { demoLogin, destroySession, loginWithPassword, SESSION_COOKIE } from "@/server/auth";
 import { cookies } from "next/headers";
 
@@ -27,7 +28,7 @@ export async function loginAction(_: ActionResult, fd: FormData): Promise<Action
     console.error("[login-error]", e instanceof Error ? e.name : "unknown");
     return { ok: false, message: "ログインに失敗しました。時間をおいて再度お試しください", at: Date.now() };
   }
-  redirect(role === "DRIVER" ? "/d" : "/app");
+  redirect(homeFor({ role: role as Role }));
 }
 
 export async function demoLoginAction(_: ActionResult, fd: FormData): Promise<ActionResult> {
@@ -40,7 +41,7 @@ export async function demoLoginAction(_: ActionResult, fd: FormData): Promise<Ac
     if (e instanceof AppError) return { ok: false, message: e.message, at: Date.now() };
     throw e;
   }
-  redirect(role === "DRIVER" ? "/d" : "/app");
+  redirect(homeFor({ role: role as Role }));
 }
 
 export async function logoutAction() {

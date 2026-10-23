@@ -9,11 +9,12 @@ import "dotenv/config";
 import { randomBytes } from "node:crypto";
 import { eq, sql } from "drizzle-orm";
 import { closeDb, getDb } from "@/db";
-import { appUser, availabilityPeriod, companySetting, division, driver, expenseCategory, userDivision } from "@/db/schema";
+import { appUser, availabilityPeriod, bankAccount, bankTransaction, company, companySetting, division, driver, expenseCategory, providerAssignment, SELF_COMPANY_ID, userDivision } from "@/db/schema";
 import type { Actor, Role } from "@/lib/access";
 import { addDays, addMonths, currentMonthJst, monthRange, todayJst } from "@/lib/dates";
 import { refreshActionCards } from "@/server/actions-engine";
 import { createBankAccount, syncBankAccount } from "@/server/bank";
+import { setVisibility } from "@/server/provider-finance";
 import { saveRule } from "@/server/budget";
 import { approveTemplate, createContract, listTemplates, setContractStatus } from "@/server/contracts";
 import { approveExpense, createExpense, submitExpense } from "@/server/expenses";
@@ -30,7 +31,7 @@ async function user(name: string, email: string, role: Role, divisionIds: string
   const db = getDb();
   const [u] = await db.insert(appUser).values({ name, email: `${email}${D}`, role, status: "ACTIVE", emailVerifiedAt: new Date() }).returning();
   for (const d of divisionIds) await db.insert(userDivision).values({ userId: u.id, divisionId: d });
-  return { userId: u.id, name, email: u.email, role, divisionIds: role === "MANAGER" ? divisionIds : [], demo: true };
+  return { userId: u.id, name, email: u.email, role, divisionIds: role === "MANAGER" ? divisionIds : [], companyId: u.companyId, demo: true };
 }
 
 async function main() {
@@ -38,7 +39,9 @@ async function main() {
   const db = getDb();
   const [s] = await db.select().from(companySetting).limit(1);
   if (s?.demoDataLoadedAt) {
-    console.log("デモデータは投入済みです（何もしませんでした）");
+    // 既にデモデータがある環境（体験版）にも、サービス提供者のデモを追加する（あれば何もしない）
+    const added = await ensureProviderDemo();
+    console.log(added ? "サービス提供者のデモを追加しました" : "デモデータは投入済みです（何もしませんでした）");
     return;
   }
   const divs = await db.select().from(division);
@@ -119,7 +122,7 @@ async function main() {
   for (const [i, [name, quals, vehicles]] of ([["佐藤 一郎（デモ）", ["冷凍"], ["軽バン"]], ["鈴木 次郎（デモ）", [], ["軽バン"]], ["高橋 三郎（デモ）", ["冷凍"], ["2t"]]] as const).entries()) {
     const [u] = await db.insert(appUser).values({ name, email: `driver${i + 1}${D}`, role: "DRIVER", status: "ACTIVE", lineUserId: `Udemo${randomBytes(14).toString("hex")}`, emailVerifiedAt: new Date(), approvedAt: new Date(), approvedById: mDrv.userId }).returning();
     await db.insert(driver).values({ userId: u.id, divisionId: drv, qualifications: [...quals], vehicles: [...vehicles], taxMode: "EXCLUSIVE" });
-    drivers.push({ userId: u.id, name, email: u.email, role: "DRIVER", divisionIds: [], demo: true });
+    drivers.push({ userId: u.id, name, email: u.email, role: "DRIVER", divisionIds: [], companyId: u.companyId, demo: true });
   }
   await addRate(db, mDrv, { projectId: pDa, method: "PER_UNIT", unitPrice: "150", unitLabel: "個", effectiveFrom: `${prev}-01` });
   await addRate(db, mDrv, { projectId: pDb, method: "HOURLY", unitPrice: "1800", effectiveFrom: `${prev}-01` });
@@ -165,14 +168,53 @@ async function main() {
     await submitMyAvailability(db, a, next);
   }
 
-  // デモ銀行口座
-  const bank = await createBankAccount(db, owner, { bankName: "デモ銀行", branchName: "仙台支店", accountNumberLast4: "0000", provider: "DEMO", openingBalance: "3200000" });
-  await syncBankAccount(db, owner, bank);
+  // デモ銀行口座とサービス提供者（口座の登録・同期・公開は提供者が行う）
+  await ensureProviderDemo();
 
   await db.update(companySetting).set({ demoDataLoadedAt: new Date() });
   await refreshActionCards(db);
   void mCln; // 清掃事業部の責任者（デモログイン用）
   console.log("デモデータを投入しました（すべて架空のデータです）");
+}
+
+/**
+ * サービス提供者のデモ（架空）
+ * - 提供者 一郎: 自社（エースナンバー東北）を担当。デモ口座を登録・同期し、一部の取引を本社・スタッフに公開
+ * - 提供者 二郎: 架空の別会社だけを担当（一郎からは見えない＝担当外の会社にアクセスできないことの確認用）
+ */
+async function ensureProviderDemo() {
+  const db = getDb();
+  const [exists] = await db.select({ id: appUser.id }).from(appUser).where(eq(appUser.email, `provider${D}`)).limit(1);
+  if (exists) return false;
+  const mk = async (name: string, email: string): Promise<Actor> => {
+    const [u] = await db.insert(appUser).values({ name, email: `${email}${D}`, role: "PROVIDER", companyId: null, status: "ACTIVE", emailVerifiedAt: new Date() }).returning();
+    return { userId: u.id, name, email: u.email, role: "PROVIDER", divisionIds: [], companyId: null, demo: true };
+  };
+  const p1 = await mk("提供者 一郎（デモ）", "provider");
+  const p2 = await mk("提供者 二郎（デモ）", "provider2");
+  const [other] = await db.insert(company).values({ name: "架空物産株式会社（デモ・担当外の会社）", isDemo: true }).returning();
+  await db.insert(providerAssignment).values([{ userId: p1.userId, companyId: SELF_COMPANY_ID }, { userId: p2.userId, companyId: other.id }]);
+
+  // 自社のデモ口座（なければ作成）
+  const [acc] = await db.select({ id: bankAccount.id }).from(bankAccount).where(eq(bankAccount.companyId, SELF_COMPANY_ID)).limit(1);
+  const selfAcc = acc?.id ?? (await createBankAccount(db, p1, SELF_COMPANY_ID, { bankName: "デモ銀行", branchName: "仙台支店", accountNumberLast4: "0000", provider: "DEMO", openingBalance: "3200000" }));
+  if (!acc) await syncBankAccount(db, p1, selfAcc);
+  // 担当外の会社のデモ口座（二郎だけが扱える）
+  const otherAcc = await createBankAccount(db, p2, other.id, { bankName: "デモ信用金庫", branchName: "本店", accountNumberLast4: "9999", provider: "DEMO", openingBalance: "800000" });
+  await syncBankAccount(db, p2, otherAcc);
+
+  // 一部を公開（本社に新しい順に約半分、スタッフ1人に2件、委託事業部に2件。残りは下書き）
+  const txns = await db.select({ id: bankTransaction.id }).from(bankTransaction).where(eq(bankTransaction.accountId, selfAcc)).orderBy(sql`${bankTransaction.txnDate} desc`);
+  const ids = txns.map((t) => t.id);
+  const hqN = Math.max(1, Math.floor(ids.length / 2));
+  const toUser = ids.slice(hqN, hqN + 2);
+  const toDiv = ids.slice(hqN + 2, hqN + 4);
+  if (ids.length) await setVisibility(db, p1, SELF_COMPANY_ID, { ids: ids.slice(0, hqN) }, { status: "PUBLISHED", hq: true });
+  const [drv1] = await db.select({ id: appUser.id }).from(appUser).where(eq(appUser.email, `driver1${D}`)).limit(1);
+  const [dv] = await db.select({ id: division.id }).from(division).where(eq(division.code, "DRV")).limit(1);
+  if (drv1 && toUser.length) await setVisibility(db, p1, SELF_COMPANY_ID, { ids: toUser }, { status: "PUBLISHED", staff: true, audience: { users: [drv1.id], divisions: [] } });
+  if (dv && toDiv.length) await setVisibility(db, p1, SELF_COMPANY_ID, { ids: toDiv }, { status: "PUBLISHED", staff: true, audience: { users: [], divisions: [dv.id] } });
+  return true;
 }
 
 main()
